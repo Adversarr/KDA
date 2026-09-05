@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnose CUDA Program Performance"
+  short_description: "Find whole-program CUDA bottlenecks"
+  default_prompt: "Use $diagnose-cuda-program-performance to run the first pass in SKILL.md. Source review needs no GPU. If Nsight Systems is blocked, continue with SKILL.md step 4's no-profiler exit (profiling-and-attribution.md section 4 plus cpu-mental-model-antipatterns.md) — do not require a .nsys-rep to start, and do not stop. When a Systems report exists, run scripts/nsys_analyze.py from this skill and quote digest.txt. Do not apply a treatment and do not profile a kernel until the twelve questions in SKILL.md are answered."

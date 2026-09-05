@@ -1,0 +1,3 @@
+interface:
+  display_name: "Torch Profile Reading"
+  short_description: "Analyze PyTorch Chrome/Kineto traces"

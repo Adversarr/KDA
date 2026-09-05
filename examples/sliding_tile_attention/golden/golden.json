@@ -1,0 +1,22 @@
+{
+  "gpu": "NVIDIA A800-SXM4-80GB",
+  "workload": "user_train",
+  "shape": "B1 H8 S10496 (27 tiles x 384 + 128 text) D128 bf16, windows (3,3,3)..(1,1,1), 31.3% of the plane attended",
+  "kernel_ms": {
+    "fwd": 0.848,
+    "bwd": 2.7
+  },
+  "tflops": {
+    "fwd": 167,
+    "bwd": 131
+  },
+  "note": "device time from torch.profiler, bench_many min of 3 rounds; golden = block-sparse FA2 in Triton driven by per-(head, Q block) lists of allowed K blocks built once from the tile mask (full blocks unmasked, partial blocks re-gather the tile mask), heavy-first program order, deterministic two-kernel backward. FLOPs count the attended pairs only (4*D fwd, 10*D bwd per pair). HunyuanVideo size (24 heads, 115456 tokens, 43% attended) forward 396 ms = 179 TFLOP/s. See GOLDEN.md.",
+  "baseline_ms": {
+    "eager_fwd": 35.31,
+    "eager_bwd": 37.5,
+    "sdpa_mask_fwd": 15.55,
+    "sdpa_mask_bwd": 20.13,
+    "compile_fwd": 10.33,
+    "compile_bwd": 11.42
+  }
+}

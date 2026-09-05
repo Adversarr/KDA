@@ -1,0 +1,3 @@
+interface:
+  display_name: "CUDA Kernel Wiki"
+  short_description: "Query a CUDA kernel optimization knowledge base"

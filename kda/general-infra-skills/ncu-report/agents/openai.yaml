@@ -1,0 +1,3 @@
+interface:
+  display_name: "NCU Report"
+  short_description: "Profile a proven kernel with Nsight Compute"

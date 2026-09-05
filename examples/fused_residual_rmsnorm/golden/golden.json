@@ -1,0 +1,15 @@
+{
+  "gpu": "NVIDIA A800-SXM4-80GB",
+  "workload": "user_b8_s512_d1024",
+  "kernel_ms": {
+    "fwd": 0.033,
+    "bwd": 0.056
+  },
+  "note": "device time from torch.profiler, bench_many min of 3 rounds; see GOLDEN.md.",
+  "baseline_ms": {
+    "eager_fwd": 0.154,
+    "eager_bwd": 0.348,
+    "compile_fwd": 0.034,
+    "compile_bwd": 0.074
+  }
+}

@@ -1,0 +1,54 @@
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda:12.8.0-devel-ubuntu22.04
+FROM ${BASE_IMAGE}
+# Pip must resolve against these indexes and nothing else. A base image or a
+# builder that exports PIP_INDEX_URL, PIP_EXTRA_INDEX_URL or a pip.conf would
+# otherwise join resolution silently, and a command-line --index-url overrides
+# the first of those but not the second. Point them at mirrors with --build-arg;
+# see examples/README.md.
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_EXTRA_INDEX_URL=
+ARG TORCH_INDEX_URL=https://mirrors.nju.edu.cn/pytorch/whl/cu128
+
+# Every architecture at or above the documented floor, so the image is portable.
+# Narrow it to the target architecture when building for one GPU family.
+ARG TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL} \
+    PIP_CONFIG_FILE=/dev/null \
+    CUDA_HOME=/usr/local/cuda \
+    PATH="/usr/local/cuda/bin:${PATH}" \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    MAX_JOBS=64
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
+    git \
+    ca-certificates \
+    build-essential \
+    cmake \
+    ninja-build \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && pip3 install --upgrade pip setuptools wheel
+
+RUN pip3 install --extra-index-url "${TORCH_INDEX_URL}" \
+    torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128
+
+RUN pip3 install \
+    "triton>=3.5.0" \
+    "tilelang==0.1.14" \
+    "nvmath-python[cu12]==1.0.0" \
+    nvtx \
+    pytest \
+    pyyaml
+
+WORKDIR /workspace/KDA

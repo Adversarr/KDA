@@ -1,0 +1,16 @@
+{
+  "gpu": "NVIDIA A800-SXM4-80GB",
+  "workload": "user_b8_s1024_d2048_h8192",
+  "kernel_ms": {
+    "fwd": 1.042,
+    "bwd": 2.286
+  },
+  "note": "device time from torch.profiler, bench_many min of 3 rounds; golden = nvmath-python GELU_AUX_BIAS epilogue inside the cuBLAS GEMM (reference/nvmath/epilogue/gemm), Triton adjoint + cuBLAS backward. Triton fallback (cuBLAS + epilogue kernel) 1.172 fwd, fused tl.dot 1.275, TileLang twin 1.470; see GOLDEN.md.",
+  "baseline_ms": {
+    "eager_fwd": 1.212,
+    "eager_bwd": 2.281,
+    "compile_fwd": 1.198,
+    "compile_bwd": 2.348,
+    "cublas_matmul_fwd": 1.017
+  }
+}
