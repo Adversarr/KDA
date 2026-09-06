@@ -1,4 +1,4 @@
-I am training a VGGT-style multi-view transformer (`minivggt/model.py`) and want the q/k/v
+I am training a VGGT-style multi-view transformer (`geometry/qkv.py`) and want the q/k/v
 preparation after the QKV projection as one fused kernel: the per-head LayerNorm on q and k, the
 2-D RoPE on q and k, and the re-layout of all three to head-major `(B, H, N, d)`. The function
 is `qkv_prep`; every attention calls it once.
@@ -26,17 +26,20 @@ should read that layout directly rather than have me split it first. The backwar
 should produce one `(B, N, 3, H, d)` gradient for the projection (plus the four `(64,)` weight
 gradients), not three.
 
-Training config is `minivggt/config.py` (`TrainConfig`, `ModelConfig`): bf16 autocast, batch 1,
+Training config is `geometry/config.py` (`TrainConfig`, `ModelConfig`): bf16 autocast, batch 1,
 4 views of a `37 x 37` patch grid, 1374 tokens per view (1 camera + 4 register + 1369 patches),
 `dim` 1024 = 16 heads x 64. The function runs twice per block pair, on `(B * S, T)` rows in the
 frame block and `(B, S * T)` rows in the global block (same number of rows, 5496 here). Real
 runs use 2 scenes of up to 24 views (66k rows) and larger grids; patch coordinates stay small
-non-negative integers. The smoke run is `python train_smoke.py --steps 50`; it prints `median_step_ms` and `final_loss`.
+non-negative integers. The training run is `python fit.py --steps 50`; it prints
+`median_step_ms` and `final_loss`.
 
 Please take it all the way: spec, kernel with the backward (`dqkv` and the four weight
 gradients), verification and benchmark against speed of light and against `torch.compile`, and
-integrate it into `minivggt/model.py` behind a flag so I can switch back to the eager code. The
+integrate it into `geometry/qkv.py` behind a flag so I can switch back to the eager code. The
 attention after it (`padded_attention` / `sdpa_attention`) is a separate request; do not fuse it
 into this kernel.
 
-Status: TASK, user_repo.
+For a bounded correctness smoke, run `python fit.py --smoke --steps 3 --seed 0` from
+`user_repo/`. This keeps target channel/head dimensions but reduces batch/token counts; use the
+unmodified representative config for performance measurements.

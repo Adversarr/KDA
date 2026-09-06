@@ -10,6 +10,53 @@ responsibility. Success is a verified, useful optimization of their actual workl
 explanation supported by measurements of why no supported change is worthwhile. Preserve
 model behavior, dtype policy, configuration, numerical tolerances and eager fallback.
 
+## Workflow at a glance
+
+```mermaid
+flowchart TD
+  DISCOVER["Discover model or selected region and workload"] --> M0["M0 scaffold - orchestrator"]
+  DISCOVER -->|"review-only or no supported opportunity"| STOP["Report findings and limitations"]
+  M0 --> M1["M1 check SPEC within recorded authorization"]
+  M1 --> M2["M2 implement - worker or serial role"]
+  M2 --> M3["M3 verify, benchmark and finalize audit"]
+  M3 -->|"fail"| REPAIR{"Source owner and stage retry budget"}
+  REPAIR -->|"kernel repair available"| M2
+  REPAIR -->|"contract or harness repair"| CONTRACT["Orchestrator repairs contract or harness; reverify affected stages"]
+  CONTRACT --> M1
+  REPAIR -->|"budget exhausted"| STOP
+  M3 -->|"incomplete"| EVIDENCE["Resolve missing or conflicting evidence; no repair or tune attempt"]
+  EVIDENCE -->|"evidence available"| M3
+  EVIDENCE -->|"blocked"| STOP
+  M3 -->|"tune; budget and mechanism available"| CHECKPOINT["Checkpoint accepted source and finalized evidence"]
+  CHECKPOINT --> M4["M4 measure one tuning hypothesis in side reports"]
+  M4 -->|"kept"| M3
+  M4 -->|"rejected"| RESTORE["Restore checkpoint; preserve consumed counters and original report iteration"]
+  RESTORE --> NEXT{"Remaining tune budget and mechanism?"}
+  NEXT -->|"yes"| CHECKPOINT
+  NEXT -->|"no"| BEST["Correct best-so-far remains tune"]
+  M3 -->|"tune; budget spent or no supported mechanism"| BEST
+  M3 -->|"pass"| M5["M5 freeze measured configs; performance pending verification"]
+  BEST --> M5
+  M5 --> M3b["M3 post-freeze verification and finalized audit"]
+  M3b -->|"kernel failure; freeze retries remain"| FROZEN["Frozen-stage repair; retain configs and no-autotune constraints"]
+  FROZEN --> M5
+  M3b -->|"contract or harness failure"| FCONTRACT["Orchestrator repairs and rechecks contract; retain frozen-stage constraints"]
+  FCONTRACT --> FROZEN
+  M3b -->|"incomplete; resolve evidence"| M3b
+  M3b -->|"blocked or retry budget exhausted"| STOP
+  M3b -->|"candidate reproduced; pass or unchanged best-so-far tune"| REVIEW["Present concrete integration change set, measurements, unmet gates and fallback"]
+  REVIEW --> AUTH{"Integration covered by recorded authorization?"}
+  AUTH -->|"yes"| M6["M6 integrate; training or inference smoke; E2E.md"]
+  AUTH -->|"no"| ASK["Obtain remaining integration decision"]
+  ASK -->|"authorized"| M6
+  ASK -->|"declined or pending"| STOP
+```
+
+The stage rules below govern the diagram's branches. Explicit review-only or per-stage
+approval requests remain binding; prior authorization for a passing result does not cover
+unmet gates. Every new worker dispatch uses STATUS's next run number; repair and tuning
+budgets are separate. Frozen-stage retries never reopen unrestricted implementation.
+
 ## Authority and user decisions
 
 Follow host instructions and explicit user constraints. These skills supply workflow defaults.

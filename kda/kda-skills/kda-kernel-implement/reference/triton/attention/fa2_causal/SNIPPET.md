@@ -115,13 +115,10 @@ pipeline's shared memory the limit (`64 x 64` tiles at `D = 128` already need 57
 | B1 H56 S4096 D128 (H3 heads) | 1.28 | 1.46 (0.87x) | 3.97 | 4.86 (0.82x) | 31.7 | 41.0 |
 | B4 H32 S2048 D64 | 0.459 | 0.470 (0.98x) | 1.54 | 1.65 (0.93x) | 16.8 | 22.7 |
 
-Against the roofline: 177 TFLOP/s forward is 57% of the datasheet peak and ~0.8 of cuBLAS on
-GEMMs of these shapes (the achievable compute roof, `bench.matmul_ms`); the FA2 kernel torch
-ships reaches 63%. This is where a Triton FA2 lands on sm80 without warp specialisation; the
-remaining gap to FA2 is its hand-scheduled softmax/GEMM overlap, not a missing tile config.
-The kernel is 14-22x faster than the eager chain and the eager chain does not fit at
-production lengths, so `sol_eff >= 0.5` against the FLOP roof (compute-patterns.md) is the
-realistic bar for this pattern and the SPEC should say so.
+The table above is historical device-time evidence. Its datasheet/cube efficiencies
+are not the current acceptance method. Use the phase-matched Flash-calibrated useful-work
+roof in [speed-of-light.md](../../../common/speed-of-light.md), retaining the runtime's
+0.70 SoL and baseline gates. Re-measure before assigning a current verdict.
 
 ## Fusing into a user op
 

@@ -1,34 +1,44 @@
 # Examples
 
-Examples for the Level-1 kernel workflow. Each directory is one kernel a user might
-ask for; `TASK.md` is the request as they would type it. A complete example also carries
-`golden/` (a hand-written kernel with measured A800 numbers; `golden.json` is the
-machine-readable part) and `user_repo/` (a small training codebase for integration and
-an end-to-end smoke run). TASK-only entries are requests, not complete runnable examples.
-KDA-authored development tests are not distributed. Golden measurements are recorded
-reference results, not promises of performance in a new environment.
+Evaluation cases for the Level-1 kernel workflow. Each directory tests how a coding agent and
+model perform on a particular kernel task when KDA is supplied in context.
 
-| example | fuses | status |
+- `user_repo/` is the input fixture: ordinary model code, configuration and a runnable workload.
+- `TASK.md` describes the request and mathematical contract.
+- `golden/` is the evaluator's reference solution, with numerical and performance evidence.
+Keep it outside the repository and context given to the agent under evaluation.
+
+Install KDA into an isolated copy of `user_repo/` and run the selected harness there. Generated
+kernels, trajectories and other run artifacts belong to that run workspace, not to `golden/`.
+The implementation and validation rules in `kda/` are the single source of truth; examples do
+not carry their own copy of the KDA runtime or another evaluation framework.
+
+A golden is accepted only when both numerical correctness and performance correctness pass.
+Performance uses KDA's audited achievable Speed-of-Light roof and baseline gates; recorded
+timings alone do not establish acceptance. Pending, failing and tuning results must remain
+explicit in the measurement record.
+
+| Example | Status | Outstanding gate |
 |---|---|---|
-| `fused_residual_rmsnorm` | residual add + RMSNorm, fp32 stream | TASK, golden, user_repo |
-| `fused_residual_layernorm` | residual add + LayerNorm | TASK only |
-| `qk_rmsnorm_rope_permute` | RMSNorm + RoPE + permute (q and k) | TASK only |
-| `qk_multihead_rmsnorm_rope_permute` | per-head RMSNorm (GQA) + interleaved RoPE + permute | TASK, golden, user_repo |
-| `f32_adaln` | LayerNorm (no affine) + per-sample adaptive scale/shift (`rowwise_onepass`, `(B, D)` modulation, `dscale`/`dshift` over tokens), optional SiLU epilogue | TASK, user_repo (`minidit`) |
-| `h3_qk_norm_mmrope` | MiniMax-H3 q/k prep: per-head RMSNorm (shared weight, 56 heads) + partial 3D MM-RoPE (96 of 128 channels, rotate-half) + permute; dense non-causal attention is the follow-up | TASK, user_repo (`minih3`) |
-| `h3_block_causal_attention` | MiniMax-H3 video attention: 56 heads x 128, block-causal mask at frame granularity (`frame(q) >= frame(k)`, `block_size = h * w` tokens, dense inside a frame), fp32 softmax; `flash_attention_2` with a structured mask, partial last frame, `S` up to 60k (int64 scores); `sdpa` with the boolean mask is the baseline | TASK, user_repo (`minih3`, video variant) |
-| `sliding_tile_attention` | HunyuanVideo Sliding Tile Attention (FastVideo): tokens in 384-token tile order + text, per-head `(H, NT, NT)` bool tile mask (window centred on the query tile, clamped), text keys for all, text queries see all; block-sparse `flash_attention_2` that visits only allowed tile pairs (31% of the plane in the smoke, 5-15% at 115k tokens), fp32 softmax, non-128-multiple `S`; `sdpa` with the token mask is the baseline. The golden is the FA2 reference driven by host-built per-(head, Q block) lists of allowed K blocks in heavy-first order: 0.85 ms fwd / 2.70 ms bwd on the smoke row, 18x / 7.5x over masked `sdpa` | TASK, golden, user_repo (`minista`) |
-| `vggt_padded_attention` | VGGT multi-view attention: 16 heads x 64, dense non-causal with a per-batch key-validity mask `(B, N)` (padded patches/views), fp32 softmax; frame block `(B*S, T=1374)` and global block `(B, S*T=5496)` shapes; `sdpa` with the boolean mask is the baseline | TASK, user_repo (`minivggt`) |
-| `vggt_qkv_layernorm_rope2d` | VGGT q/k/v prep: interleaved `(B, N, 3, H, d)` input, per-head affine LayerNorm (weight + bias) on q/k, 2-D RoPE (y half / x half, base 100) from integer positions with in-kernel cos/sin, v re-laid out; one `dqkv` gradient | TASK, user_repo (`minivggt`) |
-| `vggt_layerscale_residual_layernorm` | VGGT block boundary: `x + gamma * branch` (fp32 stream, bf16 branch, LayerScale gamma), padded rows zeroed by a `(B, N)` mask, affine LayerNorm to bf16; two outputs, five gradients | TASK, user_repo (`minivggt`) |
-| `vggt_mlp_fc1_gelu` | VGGT MLP fc1: `1024 -> 4096` GEMM + bias + exact erf GELU (`gemm_tensorcore`), save-vs-recompute decision for the GELU derivative | TASK, user_repo (`minivggt`) |
-| `fused_l2_norm_scale` | L2 norm + learned scale, wide and narrow D | TASK only |
-| `fused_gemm_epilogue` | GEMM + bias + tanh-GELU (`gemm_tensorcore`); the golden is nvmath-python's cuBLASLt epilogue when importable, else the Triton twin. No residual: `act(XW^T+b)+R` is not a transformer pattern | TASK, golden, user_repo |
+| [Residual RMSNorm](fused_residual_rmsnorm/TASK.md) | [`pass`](fused_residual_rmsnorm/golden/GOLDEN.md) | None. |
+| [Residual LayerNorm](fused_residual_layernorm/TASK.md) | [`pass`](fused_residual_layernorm/golden/GOLDEN.md) | None. |
+| [QK RMSNorm and RoPE](qk_rmsnorm_rope_permute/TASK.md) | [`pass`](qk_rmsnorm_rope_permute/golden/GOLDEN.md) | None. |
+| [GQA RMSNorm and RoPE](qk_multihead_rmsnorm_rope_permute/TASK.md) | [`incomplete`](qk_multihead_rmsnorm_rope_permute/golden/GOLDEN.md) | Conflicting small-row backward repeats. |
+| [Adaptive LayerNorm](f32_adaln/TASK.md) | [`tune`](f32_adaln/golden/GOLDEN.md) | Model SiLU backward SoL: 54%. |
+| [H3 QK normalization and MM-RoPE](h3_qk_norm_mmrope/TASK.md) | [`pass`](h3_qk_norm_mmrope/golden/GOLDEN.md) | None. |
+| [H3 block-causal attention](h3_block_causal_attention/TASK.md) | [`incomplete`](h3_block_causal_attention/golden/GOLDEN.md) | Large-workload profiler evidence missing. |
+| [Sliding-tile attention](sliding_tile_attention/TASK.md) | [`incomplete`](sliding_tile_attention/golden/GOLDEN.md) | Real-model profiling incomplete. |
+| [VGGT padded attention](vggt_padded_attention/TASK.md) | [`incomplete`](vggt_padded_attention/golden/GOLDEN.md) | Frame SoL: 36–38%; large-workload timings missing. |
+| [VGGT QKV preparation](vggt_qkv_layernorm_rope2d/TASK.md) | [`incomplete`](vggt_qkv_layernorm_rope2d/golden/GOLDEN.md) | Conflicting primary backward repeats. |
+| [VGGT LayerScale boundary](vggt_layerscale_residual_layernorm/TASK.md) | [`pass`](vggt_layerscale_residual_layernorm/golden/GOLDEN.md) | None. |
+| [VGGT exact-GELU MLP](vggt_mlp_fc1_gelu/TASK.md) | [`tune`](vggt_mlp_fc1_gelu/golden/GOLDEN.md) | Primary backward: 0.88x compiled; forward/inference below 70% SoL. |
+| [L2 normalization and scale](fused_l2_norm_scale/TASK.md) | [`pass`](fused_l2_norm_scale/golden/GOLDEN.md) | None. |
+| [GEMM epilogue](fused_gemm_epilogue/TASK.md) | [`pass`](fused_gemm_epilogue/golden/GOLDEN.md) | None. |
 
 ## Running an example
 
-With the [Linux prerequisites](../README.md#install) installed and a GPU available,
-copy a sample repository and install KDA into it. From the parent of your KDA checkout:
+With the [Linux prerequisites](../README.md#install) installed and a GPU available, copy a
+sample repository and install KDA into it. From the parent of your KDA checkout:
 
 ```bash
 cp -R KDA/examples/fused_residual_rmsnorm/user_repo ./rmsnorm-example
@@ -37,33 +47,48 @@ cd rmsnorm-example
 python train_smoke.py --steps 50
 ```
 
-Open your coding agent in `rmsnorm-example`. Start with “Can you optimize the model here?” For a selected region, ask
-“Can you fuse the residual addition and normalization in `minilm/model.py`, with inputs x,
-residual and weight and outputs the residual stream and normalized activation?”
-The longer [example request](fused_residual_rmsnorm/TASK.md) is an optional detailed specification. The workflow creates
-`kda_kernels/<op>/`, verifies the kernel, and shows measured results and a proposed model edit for integration review, unless already authorized.
-Use the Python interpreter with the GPU visible. The training command prints
-`median_step_ms` and `final_loss`; compare on your own hardware, and keep the eager
-backend available with `KDA_BACKEND=eager`.
+Open your coding agent in `rmsnorm-example`. Start with “Can you optimize the model here?” For a
+selected region, ask “Can you fuse the residual addition and normalization in `minilm/model.py`,
+with inputs x, residual and weight and outputs the residual stream and normalized activation?”
+The longer [example request](fused_residual_rmsnorm/TASK.md) is an optional detailed
+specification. The workflow creates `kda_kernels/<op>/`, verifies the kernel, and shows measured
+results and a proposed model edit for integration review, unless already authorized. Use the
+Python interpreter with the GPU visible. The training command prints `median_step_ms` and
+`final_loss`. User fixtures start as eager code; the agent adds an eager fallback when it
+integrates its generated kernel.
 
 ## Optional container environment
 
-`Dockerfile.cu128` supplies CUDA 12.8, torch, Triton, TileLang, and nvmath-python.
-From the KDA checkout, with Docker and the NVIDIA Container Toolkit available:
+`Dockerfile.cu128` supplies CUDA 12.8, torch, Triton, TileLang, and nvmath-python. From the KDA
+checkout, with Docker and the NVIDIA Container Toolkit available:
 
 ```bash
 docker build -f examples/Dockerfile.cu128 -t kda:dev .
 docker run --rm -it --gpus all -v "$PWD":/workspace/KDA kda:dev bash
 ```
 
-The image does not install a coding-agent CLI. Its package indexes can be overridden
-with `--build-arg PIP_INDEX_URL=...` and `--build-arg TORCH_INDEX_URL=...`; for example,
-use `https://pypi.org/simple` and `https://download.pytorch.org/whl/cu128` instead of
-the supplied mirrors. `PIP_EXTRA_INDEX_URL` is an optional additional index.
+The image does not install a coding-agent CLI. Its package indexes can be overridden with
+`--build-arg PIP_INDEX_URL=...` and `--build-arg TORCH_INDEX_URL=...`; for example, use
+`https://pypi.org/simple` and `https://download.pytorch.org/whl/cu128` instead of the supplied
+mirrors. `PIP_EXTRA_INDEX_URL` is an optional additional index.
 
 ## Files
 
 - `Dockerfile.cu128`: CUDA 12.8 + torch 2.11 + triton + tilelang dev image.
 - `<op>/TASK.md`: the request to give your agent.
-- `<op>/user_repo/`: sample model, configuration, and training entrypoint where provided.
-- `<op>/golden/`: standalone reference kernels and recorded measurements where provided.
+- `<op>/user_repo/`: standalone eager model, configuration and training entrypoint.
+- `<op>/golden/`: withheld kernel, independent eager reference, summary and recorded evidence.
+- `<op>/benchmark.py`: runnable numerical, timing, and adjoint checks of the golden.
+- `<op>/benchmark_cases.py`: operation-specific workloads, gradient reductions, and SoL bytes/FLOPs.
+- `_benchmark.py` and `_check_adjoint.py`: shared orchestration that imports the product runtime directly; the runtime is not copied into examples.
+
+Run `python examples/<op>/benchmark.py --help` for options. Each golden document lists
+reproducible commands. Generated reports belong under `tmp/golden-benchmarks/` or another
+directory outside `golden/`. Full benchmarks preserve all three timing rounds and use the
+minimum round median, matching the recorded measurement protocol. Scoped checks require an
+explicit output path. The input fixture for an evaluation is `user_repo/`; keep the golden
+solution and its validation scripts withheld from the agent being evaluated.
+
+[Benchmarking](BENCHMARKING.md) documents the shared measurement protocol, SoL accounting and
+workload scope. Odd-row and deliberately abnormal stress cases remain visible as optional
+diagnostics; normal model workloads retain all acceptance gates.

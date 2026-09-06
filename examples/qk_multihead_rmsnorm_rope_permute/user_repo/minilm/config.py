@@ -1,7 +1,6 @@
 """Training and model configuration (plain dataclasses; edit the defaults or override in code)."""
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -16,8 +15,6 @@ class ModelConfig:
     mlp_ratio: int = 2
     norm_eps: float = 1e-6
     rope_base: float = 10000.0
-    # Backend override for fused kernels (None = the kernel package's default).
-    kda_backend: Optional[str] = None
 
 
 @dataclass

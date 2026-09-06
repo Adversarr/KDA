@@ -1,4 +1,4 @@
-"""Eager reference: verbatim ``minilm/model.py::fc1_gelu`` from the example's user repo."""
+"""Eager reference: verbatim ``language/feedforward.py::fc1_gelu`` from the example's user repo."""
 
 import torch
 import torch.nn.functional as F

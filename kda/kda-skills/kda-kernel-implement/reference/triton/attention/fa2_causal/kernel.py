@@ -28,7 +28,7 @@ Backward, two kernels and a preprocess, all deterministic (no atomics)::
         dQ += ds K                                          # * scale at the end
 
 ``Q K^T`` is computed three times in total (forward, dK/dV pass, dQ pass); that is FA2's
-deterministic form and costs 2.5x the forward FLOPs for the backward (5 GEMMs vs 2). The
+deterministic form and has 2.5x the useful forward FLOPs in backward (5 useful GEMMs vs 2; 7 issued). The
 alternative, one pass with ``tl.atomic_add`` on dQ, saves one GEMM and is not bitwise
 reproducible, which the KDA verifier rejects.
 
@@ -406,7 +406,7 @@ def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: Optional
 
 
 def attention_flops(B: int, H: int, S: int, D: int, phase: str) -> float:
-    """Tensor-core FLOPs actually executed with the causal block skip: the attended area is ``S(S+1)/2`` pairs."""
+    """Useful tensor-core FLOPs with the causal block skip: the attended area is ``S(S+1)/2`` pairs."""
     pairs = B * H * S * (S + 1) / 2
     per_pair = {"fwd": 4 * D, "infer": 4 * D, "bwd": 10 * D}[phase]  # 2 GEMMs forward, 5 backward, 2 FLOP each
     return pairs * per_pair

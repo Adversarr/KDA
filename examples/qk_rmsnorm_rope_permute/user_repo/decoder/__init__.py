@@ -1,0 +1,1 @@
+"""Equal-head rotary decoder."""

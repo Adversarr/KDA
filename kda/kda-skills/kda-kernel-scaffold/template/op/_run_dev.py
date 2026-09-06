@@ -42,7 +42,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import torch
 
 from .._common import VERSION
-from .._common.bench import bench_ms, compile_or_none, configure_compile_for_dev, copy_ms, matmul_ms, resolve_method
+from .._common.bench import attention_ms, bench_ms, compile_or_none, configure_compile_for_dev, copy_ms, matmul_ms, measurement_diagnostics, resolve_method
 from .._common.compat import USE_CUSTOM_OP
 from .._common.gpu_info import GpuInfo, compute_ms, get_gpu_info, sol_ms
 from .._common.report import ALL_PHASES, RECOMPUTE_PHASE, WorkloadResult, write_report
@@ -344,6 +344,9 @@ def run_workload(
                     nbytes, flops = sol.estimate(phase, **base, **w.params)
                 except NotImplementedError:
                     r.sol_ms[phase] = r.roof_ms[phase] = None
+                    if getattr(sol, "ROOF_METHOD", "auto") == "attention":
+                        r.roof_details[phase] = {"method": "attention", "available": False,
+                                                 "reason": "attention byte/FLOP estimate is not implemented"}
                     continue
                 r.sol_ms[phase] = sol_ms(nbytes, flops, info, roof=sol.ROOF)
                 # Achievable roof: a same-size copy (memory) vs the compute roof, whichever is
@@ -351,6 +354,17 @@ def run_workload(
                 # (`gemm_shapes` when the roofline names them, a same-FLOP cube otherwise), not
                 # the datasheet peak nothing reaches; on CUDA cores it stays the datasheet number.
                 copy = copy_ms(nbytes, method=method, device=device)
+                if getattr(sol, "ROOF_METHOD", "auto") == "attention":
+                    try:
+                        descriptor = sol.attention_work(phase, **base, **w.params)
+                        detail = attention_ms(phase, **descriptor, dtype=w.torch_dtype,
+                                              method=method, device=device)
+                    except (NotImplementedError, AttributeError, ValueError, TypeError) as exc:
+                        detail = {"method": "attention", "available": False,
+                                  "roof_ms": None, "reason": f"{type(exc).__name__}: {exc}"}
+                    r.roof_details[phase] = dict(detail, copy_ms=copy)
+                    r.roof_ms[phase] = max(copy, detail["roof_ms"]) if detail["available"] else None
+                    continue
                 if TENSOR_CORE_ROOF:
                     shapes = _gemm_shapes(phase, base, w.params)
                     compute = matmul_ms(flops, shapes=shapes, dtype=w.torch_dtype, method=method, device=device)
@@ -541,6 +555,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "common_version": VERSION,
         "bench_method": resolve_method(args.method, device) if args.bench else None,  # resolved, never "auto"
         "peaks": info.as_dict(),
+        "measurement_diagnostics": measurement_diagnostics(),
     }
     coverage = {"all_workloads": [w.name for w in spec.workloads], "benchmark": args.bench, "required": {}}
     for w in selected:

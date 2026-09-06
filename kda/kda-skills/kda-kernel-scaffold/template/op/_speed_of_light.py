@@ -21,6 +21,8 @@ import torch
 # epilogues). A tensor-core ROOF also switches the harness to the *achievable* compute roof
 # (cuBLAS on `gemm_shapes`, below) and to an autotuned torch.compile baseline.
 ROOF = "fp32"
+# Use "attention" for Flash-calibrated useful work; ROOF still selects the datasheet dtype.
+ROOF_METHOD = "auto"
 PHASES = ("fwd", "infer", "bwd", "bwd_recompute")
 
 
@@ -61,10 +63,8 @@ def gemm_shapes(phase: str, **inputs) -> List[Tuple[int, int, int]]:
       bwd: ``[(M, K, N), (N, K, M)]``            dX = dZ W, dW = dZ^T X
       bwd_recompute: the forward GEMM plus the two above
 
-    Attention (``flash_attention_2``): keep the ``NotImplementedError``. Its per-head GEMMs are
-    skinny in ``K = head_dim`` and cuBLAS runs them slower than the fused kernel, so listing
-    them reports ``sol_eff > 1``; the same-FLOP cube the harness falls back to is the fair
-    achievable roof.
+    Attention (``flash_attention_2``): set ROOF_METHOD="attention" and implement
+    attention_work instead; the runner uses forced dense Flash calibration, not cuBLAS.
     """
     # TODO(scaffold): tensor-core ops only, e.g.
     #   m, k = inputs["x"].shape[-2], inputs["x"].shape[-1]; n = inputs["weight"].shape[0]
@@ -73,4 +73,16 @@ def gemm_shapes(phase: str, **inputs) -> List[Tuple[int, int, int]]:
     raise NotImplementedError("{{op}} has no tensor-core GEMMs (or gemm_shapes is not written yet)")
 
 
-__all__ = ["ROOF", "PHASES", "estimate", "gemm_shapes"]
+def attention_work(phase: str, **inputs) -> dict:
+    """Describe attention independently of the candidate implementation.
+
+    Return q_shape/k_shape/v_shape in (B,H,S,D) order and pairs: the useful allowed
+    query/key pair count across batches/query heads. Count masks from their math,
+    not tiles visited. Native GQA retains separate query/KV head counts. The runner
+    uses the workload dtype and device; calibration never calls the candidate.
+    Standard Flash storage-dtype throughput does not certify intermediate rounding.
+    """
+    raise NotImplementedError("{{op}} attention_work is not written yet")
+
+
+__all__ = ["ROOF", "ROOF_METHOD", "PHASES", "estimate", "gemm_shapes", "attention_work"]

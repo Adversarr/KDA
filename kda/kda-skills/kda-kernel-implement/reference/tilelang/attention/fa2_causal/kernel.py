@@ -383,7 +383,7 @@ def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: Optional
 
 
 def attention_flops(B: int, H: int, S: int, D: int, phase: str) -> float:
-    """Tensor-core FLOPs actually executed with the causal block skip: the attended area is ``S(S+1)/2`` pairs."""
+    """Useful tensor-core FLOPs with the causal block skip: the attended area is ``S(S+1)/2`` pairs."""
     pairs = B * H * S * (S + 1) / 2
     per_pair = {"fwd": 4 * D, "infer": 4 * D, "bwd": 10 * D}[phase]
     return pairs * per_pair

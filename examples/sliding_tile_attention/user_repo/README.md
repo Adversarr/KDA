@@ -1,20 +1,40 @@
-# minista (video DiT, Sliding Tile Attention)
+# Sliding-tile attention training repository
 
-One HunyuanVideo-style DiT block trained on random video latents plus text tokens; exists to
-have a realistic training loop around `sliding_tile_attention` in `minista/model.py`. The
-video tokens are kept in **tile order** (tiles of `(6, 8, 8)` = 384 contiguous tokens,
-enumerated t-major over the tile grid) with the text tokens appended. Every head has its own
-window in tiles: a query tile attends to the `kt x kh x kw` tiles centred on it (centre clamped
-into the grid) plus every text token; text queries attend to everything. The mask is
-block-sparse at tile granularity (`sta_tile_mask`, `(H, NT, NT)` bool, built once) and dense
-inside a tile pair; the eager attention expands it to a token mask and materialises the fp32
-score plane, softmax in fp32.
+Tile-ordered video plus text, with head-dependent sparse windows and an irregular text tail.
+
+This is an ordinary eager PyTorch training repository. It runs independently with Python and
+PyTorch on a CUDA GPU, without downloaded data or pretrained weights. Synthetic data is
+generated from a fixed seed. No kernel package is required.
+
+## Run
+
+From this directory, run a bounded training check:
 
 ```bash
-python train_smoke.py --steps 50      # prints per-step loss/time, then median_step_ms and final_loss
+python -m recipes.train --smoke --steps 3 --seed 0
 ```
 
-Configuration is `minista/config.py` (`ModelConfig`, `TrainConfig`): bf16 autocast, batch 1,
-canvas `(18, 24, 24)` = 10368 video tokens in 27 tiles + 128 text tokens, `hidden_size` 1024,
-8 heads of dim 128 with windows from `(3, 3, 3)` (dense on this grid) down to `(1, 1, 1)`,
-1 layer.
+For the representative workload described in the task:
+
+```bash
+python -m recipes.train --steps 50 --seed 0
+```
+
+`--smoke` reduces batch size, token count and/or depth while retaining the target's channel
+widths and head dimensions. It is a correctness smoke, not the representative benchmark. The
+final two lines are `median_step_ms` and `final_loss`. Timing includes backward and the
+optimizer update, uses CUDA synchronization, and discards the first ten steps when available.
+`--steps` must be positive. The training loop rejects non-finite losses.
+
+## Code
+
+The selected operation is defined in `sta/attention.py`. Configuration lives in `sta/config.py`.
+The surrounding model calls the operation in its real forward path; the loss, backward and
+optimizer exercise its trainable parameters.
+
+- `recipes/train.py`
+- `sta/attention.py`
+- `sta/config.py`
+- `sta/dit.py`
+- `sta/layout.py`
+- `sta/masks.py`

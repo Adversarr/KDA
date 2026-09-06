@@ -1,6 +1,6 @@
 """Golden for ``sliding_tile_attention``: block-sparse FlashAttention-2 in Triton, forward and backward.
 
-The math is ``softmax(q k^T / sqrt(D), masked) v`` with the STA mask of `minista/model.py`
+The math is ``softmax(q k^T / sqrt(D), masked) v`` with the STA mask of `sta/attention.py`
 (``tile_mask: (H, NT, NT)`` bool over ``tile_size``-token tiles, text keys visible to every
 query, text queries see every key, softmax in fp32). The kernels are the FA2 reference
 (`kda-kernel-implement/reference/triton/attention/fa2_causal/`: log2-domain online softmax,
@@ -28,7 +28,6 @@ HunyuanVideo. ``B*H*S*S`` is logical only; the ``(b, h)`` base offsets are int64
 ``(b, h)`` plane must fit int32 (host check), as in the FA2 reference.
 """
 
-import math
 from typing import Dict, Optional, Tuple
 
 import torch
@@ -89,13 +88,20 @@ def _block_lists(tile_mask: torch.Tensor, ts: int, text_len: int, S: int, bq: in
     return order[:, :, :maxn].to(torch.int32).contiguous(), n_full.contiguous(), n_any.contiguous(), perm.contiguous()
 
 
-_LISTS: Dict[tuple, Tuple[torch.Tensor, ...]] = {}
+_LISTS: Dict[tuple, Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]] = {}
 
 
 def block_lists(tile_mask: torch.Tensor, ts: int, text_len: int, S: int, bq: int, bk: int, transpose: bool = False):
     """Cached `_block_lists`; ``transpose`` gives the per-K-block lists of Q blocks (dK/dV kernel)."""
-    key = (tile_mask.data_ptr(), tuple(tile_mask.shape), ts, text_len, S, bq, bk, transpose, tile_mask.device.index)
-    hit = _LISTS.get(key)
+    # Retain the owner and version: pointer reuse and in-place mask edits must not
+    # reuse block lists computed for different allowed pairs.
+    try:
+        version = tile_mask._version
+    except RuntimeError:  # inference tensors have no version counter
+        version = None
+    key = (id(tile_mask), version, tuple(tile_mask.shape), ts, text_len, S, bq, bk, transpose, tile_mask.device.index)
+    entry = _LISTS.get(key) if version is not None else None
+    hit = entry[1] if entry is not None else None
     if hit is None:
         if transpose:
             hit = _block_lists(tile_mask.transpose(1, 2).contiguous(), ts, text_len, S, bq, bk)
@@ -103,7 +109,8 @@ def block_lists(tile_mask: torch.Tensor, ts: int, text_len: int, S: int, bq: int
             hit = _block_lists(tile_mask, ts, text_len, S, bq, bk)
         if len(_LISTS) > 64:
             _LISTS.clear()
-        _LISTS[key] = hit
+        if version is not None:
+            _LISTS[key] = (tile_mask, hit)
     return hit
 
 
@@ -152,7 +159,7 @@ def _attn_fwd_inner(
             k = tl.load(k_base + offs_d[:, None] + offs_n[None, :] * stride_kn, mask=mask_d[:, None] & mask_n[None, :], other=0.0)
         else:
             k = tl.load(k_base + offs_d[:, None] + offs_n[None, :] * stride_kn, mask=mask_d[:, None], other=0.0)
-        s = tl.dot(q, k) * scale_log2
+        s = tl.dot(q, k).to(q.dtype).to(tl.float32) * scale_log2
         if MASK:
             s = tl.where(_token_mask(tm_base, offs_m, offs_n, V, S, TS, NT), s, float("-inf"))
         m_new = tl.maximum(m_i, tl.max(s, axis=1))
@@ -183,7 +190,7 @@ def _attn_fwd_kernel(
     stride_vb, stride_vh, stride_vn,
     stride_ob, stride_oh, stride_om,
     H, S, D, V, TS, NT, NQB, MAXN, scale_log2,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_D: tl.constexpr,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_D: tl.constexpr, SAVE_LSE: tl.constexpr,
 ):
     row = tl.load(perm_ptr + tl.program_id(0))  # (head, Q block) in heavy-first order
     h = (row // NQB).to(tl.int64)
@@ -215,7 +222,8 @@ def _attn_fwd_kernel(
     acc = acc / l_i[:, None]
     o_base = o_ptr + b * stride_ob + h * stride_oh
     tl.store(o_base + offs_m64[:, None] * stride_om + offs_d[None, :], acc.to(o_ptr.dtype.element_ty), mask=mask_m[:, None] & mask_d[None, :])
-    tl.store(lse_ptr + bh * S + offs_m, m_i + tl.math.log2(l_i), mask=mask_m)
+    if SAVE_LSE:
+        tl.store(lse_ptr + bh * S + offs_m, m_i + tl.math.log2(l_i), mask=mask_m)
 
 
 @triton.jit
@@ -254,13 +262,13 @@ def _attn_bwd_dkdv_inner(
         do = tl.load(do_base + offs_m[:, None] * stride_dom + offs_d[None, :], mask=mask_m[:, None] & mask_d[None, :], other=0.0)
         lse = tl.load(lse_base + offs_m, mask=mask_m, other=float("inf"))  # tail rows: lse = +inf -> p = 0
         delta = tl.load(delta_base + offs_m, mask=mask_m, other=0.0)
-        sT = tl.dot(k, tl.trans(q)) * scale_log2  # (BLOCK_N, BLOCK_M): keys down, queries across
+        sT = tl.dot(k, tl.trans(q)).to(q.dtype).to(tl.float32) * scale_log2  # (BLOCK_N, BLOCK_M): keys down, queries across
         pT = tl.math.exp2(sT - lse[None, :])
         if MASK:
             # rows are keys here: the gather runs on the transposed tile mask with (key, query) roles
             pT = tl.where(_token_mask(tm_base, offs_n, offs_m, V, S, TS, NT), pT, 0.0)
         dv += tl.dot(pT.to(do.dtype), do)
-        dpT = tl.dot(v, tl.trans(do))
+        dpT = tl.dot(v, tl.trans(do)).to(do.dtype).to(tl.float32)
         dsT = pT * (dpT - delta[None, :])
         dk += tl.dot(dsT.to(q.dtype), q)
     return dk, dv
@@ -326,11 +334,11 @@ def _attn_bwd_dq_inner(
         else:
             k = tl.load(k_base + offs_n[:, None] * stride_kn + offs_d[None, :], mask=mask_d[None, :], other=0.0)
             v = tl.load(v_base + offs_n[:, None] * stride_vn + offs_d[None, :], mask=mask_d[None, :], other=0.0)
-        s = tl.dot(q, tl.trans(k)) * scale_log2
+        s = tl.dot(q, tl.trans(k)).to(q.dtype).to(tl.float32) * scale_log2
         p = tl.math.exp2(s - lse[:, None])
         if MASK:
             p = tl.where(_token_mask(tm_base, offs_m, offs_n, V, S, TS, NT), p, 0.0)
-        dp = tl.dot(do, tl.trans(v))
+        dp = tl.dot(do, tl.trans(v)).to(do.dtype).to(tl.float32)
         ds = p * (dp - delta[:, None])
         dq += tl.dot(ds.to(k.dtype), k)
     return dq
@@ -380,8 +388,14 @@ def _attn_bwd_dq_kernel(
 # ----------------------------------------------------------------------------------------------
 
 
-def select_config(D: int, phase: str) -> Dict[str, int]:
+def select_config(D: int, phase: str, sequence: int = 0) -> Dict[str, int]:
     """Same geometry as the FA2 reference (A800): 128 x 128 / 8 warps forward at D = 128, 64 x 64 / 4 warps backward."""
+    if 0 < sequence <= 512:
+        # Smaller tiles provide enough independent programs for the short sequence.
+        if phase == "fwd":
+            return dict(BLOCK_M=32, BLOCK_N=32, num_warps=4, num_stages=2)
+        return dict(BLOCK_M1=32, BLOCK_N1=32, BLOCK_M2=32, BLOCK_N2=32,
+                    num_warps=4, num_stages=2)
     if phase == "fwd":
         if D <= 64:
             return dict(BLOCK_M=128, BLOCK_N=64, num_warps=4, num_stages=3)
@@ -392,7 +406,7 @@ def select_config(D: int, phase: str) -> Dict[str, int]:
         return dict(BLOCK_M=64, BLOCK_N=64, num_warps=8, num_stages=2)
     if D <= 128:
         return dict(BLOCK_M1=64, BLOCK_N1=64, BLOCK_M2=64, BLOCK_N2=64, num_warps=4, num_stages=2)
-    return dict(BLOCK_M1=32, BLOCK_N1=64, BLOCK_M2=64, BLOCK_N2=32, num_warps=8, num_stages=2)
+    return dict(BLOCK_M1=32, BLOCK_N1=128, BLOCK_M2=128, BLOCK_N2=32, num_warps=8, num_stages=2)
 
 
 def _check(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, tile_mask: torch.Tensor, tile_size: int, text_len: int) -> None:
@@ -419,7 +433,7 @@ def _u8(tile_mask: torch.Tensor) -> torch.Tensor:
 
 
 def sta_fwd(
-    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, tile_mask: torch.Tensor, tile_size: int, text_len: int, scale: Optional[float] = None
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, tile_mask: torch.Tensor, tile_size: int, text_len: int, scale: Optional[float] = None, *, save_lse: bool = True
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Returns ``o`` (q's shape and dtype) and ``lse`` (``(B, H, S)`` fp32, log2 domain)."""
     _check(q, k, v, tile_mask, tile_size, text_len)
@@ -427,10 +441,10 @@ def sta_fwd(
     NT = tile_mask.shape[1]
     V = NT * tile_size
     scale = D**-0.5 if scale is None else scale
-    cfg = select_config(D, "fwd")
+    cfg = select_config(D, "fwd", S)
     idx, n_full, n_any, perm = block_lists(tile_mask, tile_size, text_len, S, cfg["BLOCK_M"], cfg["BLOCK_N"])
     o = torch.empty_like(q)
-    lse = torch.empty(B, H, S, dtype=torch.float32, device=q.device)
+    lse = torch.empty((B, H, S) if save_lse else (0,), dtype=torch.float32, device=q.device)
     NQB = triton.cdiv(S, cfg["BLOCK_M"])
     _attn_fwd_kernel[(H * NQB, B)](
         q, k, v, o, lse, _u8(tile_mask), idx, n_full, n_any, perm,
@@ -439,7 +453,7 @@ def sta_fwd(
         v.stride(0), v.stride(1), v.stride(2),
         o.stride(0), o.stride(1), o.stride(2),
         H, S, D, V, tile_size, NT, NQB, idx.shape[-1], scale * LOG2E,
-        BLOCK_M=cfg["BLOCK_M"], BLOCK_N=cfg["BLOCK_N"], BLOCK_D=triton.next_power_of_2(D),
+        BLOCK_M=cfg["BLOCK_M"], BLOCK_N=cfg["BLOCK_N"], BLOCK_D=triton.next_power_of_2(D), SAVE_LSE=save_lse,
         num_warps=cfg["num_warps"], num_stages=cfg["num_stages"],
     )
     return o, lse
@@ -459,7 +473,7 @@ def sta_bwd(
     dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
     delta = torch.empty_like(lse)
     BLOCK_D = triton.next_power_of_2(D)
-    cfg = select_config(D, "bwd")
+    cfg = select_config(D, "bwd", S)
     pre_block = 128
     _attn_bwd_preprocess_kernel[(triton.cdiv(S, pre_block), B * H)](
         o, do, delta,
@@ -496,9 +510,10 @@ def sta_bwd(
 
 class _STA(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q, k, v, tile_mask, tile_size, text_len):
-        o, lse = sta_fwd(q, k, v, tile_mask, tile_size, text_len)
-        ctx.save_for_backward(q, k, v, o, lse, tile_mask)
+    def forward(ctx, q, k, v, tile_mask, tile_size, text_len, save_lse):
+        o, lse = sta_fwd(q, k, v, tile_mask, tile_size, text_len, save_lse=save_lse)
+        if save_lse:
+            ctx.save_for_backward(q, k, v, o, lse, tile_mask)
         ctx.geometry = (tile_size, text_len)
         return o
 
@@ -506,14 +521,15 @@ class _STA(torch.autograd.Function):
     def backward(ctx, do):
         q, k, v, o, lse, tile_mask = ctx.saved_tensors
         dq, dk, dv = sta_bwd(q, k, v, o, do.contiguous() if do.stride(-1) != 1 else do, lse, tile_mask, *ctx.geometry)
-        return dq, dk, dv, None, None, None
+        return dq, dk, dv, None, None, None, None
 
 
 def sliding_tile_attention(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, tile_mask: torch.Tensor, tile_size: int, text_len: int
 ) -> torch.Tensor:
-    """Drop-in for ``minista.model.sliding_tile_attention``: ``(B, H, S, D)`` in, ``(B, H, S, D)`` out."""
-    return _STA.apply(q, k, v, tile_mask, tile_size, text_len)
+    """Drop-in for ``sta.attention.sliding_tile_attention``: ``(B, H, S, D)`` in, ``(B, H, S, D)`` out."""
+    save_lse = torch.is_grad_enabled() and any(t.requires_grad for t in (q, k, v))
+    return _STA.apply(q, k, v, tile_mask, tile_size, text_len, save_lse)
 
 
 __all__ = [

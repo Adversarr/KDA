@@ -1,0 +1,3064 @@
+{
+  "status": "pass",
+  "workload": "user_train",
+  "gpu": "NVIDIA A800-SXM4-80GB",
+  "measurement": "torch.profiler device times; minimum of three interleaved rounds; fresh compiler state per workload",
+  "verification": {
+    "numerics": "see per-workload output and gradient comparisons",
+    "adjoints_passed": true,
+    "final_audit": "Source-matched full required numerical and performance coverage, eligible baselines, independent adjoints and near-gate repeats audited; all pass.",
+    "audit_complete": true
+  },
+  "kernel_ms": {
+    "fwd": 0.0869429999999993,
+    "bwd": 0.14401600000000098,
+    "infer": 0.08452750000000003
+  },
+  "baseline_ms": {
+    "eager_fwd": 1.8973229999999939,
+    "compiled_fwd": 0.2047829999999999,
+    "eager_infer": 1.8972289999999994,
+    "compiled_infer": 0.18999950000000002,
+    "eager_bwd": 3.8124215000000037,
+    "compiled_bwd": 0.320384
+  },
+  "roof_ms": {
+    "fwd": 0.07694350000000008,
+    "infer": 0.07627149999999983,
+    "bwd": 0.1129925000000003
+  },
+  "sol_ms": {
+    "fwd": 0.05881782799748902,
+    "infer": 0.05836785938480854,
+    "bwd": 0.08913496547394853
+  },
+  "derived": {
+    "fwd": {
+      "sol_eff": 0.8849878656131109,
+      "speedup": 2.355370760153222
+    },
+    "bwd": {
+      "sol_eff": 0.7845829630041075,
+      "speedup": 2.224641706477043
+    },
+    "infer": {
+      "sol_eff": 0.9023276448493069,
+      "speedup": 2.24778326580107
+    }
+  },
+  "measurement_environment": {
+    "bench_method": "profiler",
+    "gpu": {
+      "name": "NVIDIA A800-SXM4-80GB",
+      "cc": "8.0",
+      "sms": 108,
+      "sm_clock_ghz": 1.41,
+      "l2_bytes": 41943040,
+      "total_mem_bytes": 85167243264,
+      "hbm_gbps": 2039.04,
+      "fp32_tflops": 19.5,
+      "bf16_tflops": 312.0,
+      "flops_source": "table"
+    },
+    "torch": "2.11.0+cu128"
+  },
+  "source_hashes": {
+    "golden/kernel.py": "6d47969daabec29596f88c38c21631bb6d7f40f0ea0d2df528ced7443641d3ba",
+    "golden/reference.py": "3a98dfc13b69a23de63e7a8a1aab903e4570daae39c094ab46befb6e59c5a1c0"
+  },
+  "validation_hashes": {
+    "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+    "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "8cabd40935ca2bd3a949c7a7c698afb335c5f27384ed3a5aeff701372f2cc1ab",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "647465a47c68fc3aeb424a08de2320d30923f7efa20771592078d4ac5c6478d7",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "fb8568b7258be31e07d11bcf1c30f05e88f42600f020251022bceb151563c60b",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "813939ef97a115e146e00974b40bd5159a4923f3ba0d651bfc1ddf30e0ed9134",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269",
+    "tmp/examples-completion/cases/h3_qk_norm_mmrope.py": "df878cbb4a11b911a19c21e93942f405d981950e5ec18cf9101e082c5c45edae",
+    "tmp/examples-completion/run.py": "63fa76a27f8f20ed280ede6fa71eba0f207526f46aec05fac6941b79233d216e"
+  },
+  "coverage": {
+    "all_workloads": [
+      "user_train",
+      "small_tail",
+      "strided",
+      "zero_rows",
+      "long_sequence"
+    ],
+    "benchmark": true,
+    "required": {
+      "user_train": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": [
+          "kernel_fwd",
+          "kernel_infer",
+          "kernel_bwd"
+        ]
+      },
+      "small_tail": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": [
+          "kernel_fwd",
+          "kernel_infer",
+          "kernel_bwd"
+        ]
+      },
+      "strided": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": [
+          "kernel_fwd",
+          "kernel_infer",
+          "kernel_bwd"
+        ]
+      },
+      "zero_rows": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": []
+      },
+      "long_sequence": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": [
+          "kernel_fwd",
+          "kernel_infer",
+          "kernel_bwd"
+        ]
+      }
+    }
+  },
+  "performance_verdict": "pass",
+  "reasons": [
+    "small_tail/bwd: SOL efficiency 0.51 not gated: latency-bound (roof 3.0 us < 10 us)",
+    "strided/bwd: SOL efficiency 0.52 not gated: latency-bound (roof 3.1 us < 10 us)"
+  ],
+  "workloads": [
+    {
+      "name": "user_train",
+      "required": true,
+      "dtype": "bf16",
+      "fwd": {
+        "0": {
+          "max_abs": 0.015625,
+          "max_rel": 0.062111801242236024,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 14680064,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.015625,
+          "max_rel": 0.016853932584269662,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 14680064,
+          "passed": true
+        }
+      },
+      "bwd": {
+        "0": {
+          "max_abs": 0.015625,
+          "max_rel": 0.0152587890625,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 14680064,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.015625,
+          "max_rel": 0.0514984130859375,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 14680064,
+          "passed": true
+        },
+        "2": {
+          "max_abs": 0.017364501953125,
+          "max_rel": 0.00019566235494161057,
+          "atol": 5.418498685060282,
+          "rtol": 0.016,
+          "reduced_over": 114688,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        },
+        "3": {
+          "max_abs": 0.0147705078125,
+          "max_rel": 0.0015135657684264856,
+          "atol": 5.418498685060282,
+          "rtol": 0.016,
+          "reduced_over": 114688,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        }
+      },
+      "infer": {
+        "0": {
+          "max_abs": 0.015625,
+          "max_rel": 0.062111801242236024,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 14680064,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.015625,
+          "max_rel": 0.016853932584269662,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 14680064,
+          "passed": true
+        }
+      },
+      "bwd_recompute": null,
+      "time_ms": {
+        "kernel_fwd": 0.0869429999999993,
+        "eager_fwd": 1.8973229999999939,
+        "compiled_fwd": 0.2047829999999999,
+        "kernel_infer": 0.08452750000000003,
+        "eager_infer": 1.8972289999999994,
+        "compiled_infer": 0.18999950000000002,
+        "kernel_bwd": 0.14401600000000098,
+        "eager_bwd": 3.8124215000000037,
+        "compiled_bwd": 0.320384
+      },
+      "sol_ms": {
+        "fwd": 0.05881782799748902,
+        "infer": 0.05836785938480854,
+        "bwd": 0.08913496547394853
+      },
+      "roof_ms": {
+        "fwd": 0.07694350000000008,
+        "infer": 0.07627149999999983,
+        "bwd": 0.1129925000000003
+      },
+      "error": null,
+      "skipped": null,
+      "warnings": [],
+      "compile": null,
+      "compile_error": null,
+      "contract": null,
+      "derived": {
+        "fwd": {
+          "sol_eff": 0.8849878656131109,
+          "speedup": 2.355370760153222
+        },
+        "bwd": {
+          "sol_eff": 0.7845829630041075,
+          "speedup": 2.224641706477043
+        },
+        "infer": {
+          "sol_eff": 0.9023276448493069,
+          "speedup": 2.24778326580107
+        }
+      }
+    },
+    {
+      "name": "small_tail",
+      "required": true,
+      "dtype": "bf16",
+      "fwd": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        }
+      },
+      "bwd": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 5.960464477539063e-08,
+          "max_rel": 3.725290298461914e-06,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "2": {
+          "max_abs": 3.814697265625e-06,
+          "max_rel": 1.18034785148701e-05,
+          "atol": 0.16159207901379324,
+          "rtol": 0.016,
+          "reduced_over": 102,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        },
+        "3": {
+          "max_abs": 3.814697265625e-06,
+          "max_rel": 5.459290073918788e-06,
+          "atol": 0.16159207901379324,
+          "rtol": 0.016,
+          "reduced_over": 102,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        }
+      },
+      "infer": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        }
+      },
+      "bwd_recompute": null,
+      "time_ms": {
+        "kernel_fwd": 0.004047500000000127,
+        "eager_fwd": 0.1377290000000021,
+        "compiled_fwd": 0.004239999999999782,
+        "kernel_infer": 0.003984000000000151,
+        "eager_infer": 0.13768099999999914,
+        "compiled_infer": 0.00454400000000021,
+        "kernel_bwd": 0.005935999999999922,
+        "eager_bwd": 0.22747100000000225,
+        "compiled_bwd": 0.010879499999999553
+      },
+      "sol_ms": {
+        "fwd": 5.852950408035154e-05,
+        "infer": 5.81293157564344e-05,
+        "bwd": 8.464375392341495e-05
+      },
+      "roof_ms": {
+        "fwd": 0.0029760000000003404,
+        "infer": 0.0030080000000000384,
+        "bwd": 0.0030235000000000127
+      },
+      "error": null,
+      "skipped": null,
+      "warnings": [],
+      "compile": null,
+      "compile_error": null,
+      "contract": null,
+      "derived": {
+        "fwd": {
+          "sol_eff": 0.7352686843731308,
+          "speedup": 1.0475602223593943
+        },
+        "bwd": {
+          "sol_eff": 0.5093497304582298,
+          "speedup": 1.8327998652290591
+        },
+        "infer": {
+          "sol_eff": 0.7550200803212662,
+          "speedup": 1.1405622489959937
+        }
+      }
+    },
+    {
+      "name": "strided",
+      "required": true,
+      "dtype": "bf16",
+      "fwd": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        }
+      },
+      "bwd": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "2": {
+          "max_abs": 3.814697265625e-06,
+          "max_rel": 7.811137119304704e-06,
+          "atol": 0.16159207901379324,
+          "rtol": 0.016,
+          "reduced_over": 102,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        },
+        "3": {
+          "max_abs": 3.814697265625e-06,
+          "max_rel": 8.219808642854794e-06,
+          "atol": 0.16159207901379324,
+          "rtol": 0.016,
+          "reduced_over": 102,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        }
+      },
+      "infer": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 13056,
+          "passed": true
+        }
+      },
+      "bwd_recompute": null,
+      "time_ms": {
+        "kernel_fwd": 0.004,
+        "eager_fwd": 0.14601400000000148,
+        "compiled_fwd": 0.004160499999999956,
+        "kernel_infer": 0.003888000000000034,
+        "eager_infer": 0.1460790000000018,
+        "compiled_infer": 0.00475200000000018,
+        "kernel_bwd": 0.005920499999999947,
+        "eager_bwd": 0.22641250000000035,
+        "compiled_bwd": 0.0107199999999998
+      },
+      "sol_ms": {
+        "fwd": 5.852950408035154e-05,
+        "infer": 5.81293157564344e-05,
+        "bwd": 8.464375392341495e-05
+      },
+      "roof_ms": {
+        "fwd": 0.002928000000000111,
+        "infer": 0.002992000000000189,
+        "bwd": 0.0031040000000001552
+      },
+      "error": null,
+      "skipped": null,
+      "warnings": [],
+      "compile": null,
+      "compile_error": null,
+      "contract": null,
+      "derived": {
+        "fwd": {
+          "sol_eff": 0.7320000000000277,
+          "speedup": 1.0401249999999889
+        },
+        "bwd": {
+          "sol_eff": 0.5242800439152409,
+          "speedup": 1.8106578836246763
+        },
+        "infer": {
+          "sol_eff": 0.7695473251029226,
+          "speedup": 1.2222222222222578
+        }
+      }
+    },
+    {
+      "name": "zero_rows",
+      "required": true,
+      "dtype": "bf16",
+      "fwd": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 0,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 0,
+          "passed": true
+        }
+      },
+      "bwd": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 0,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 0,
+          "passed": true
+        },
+        "2": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        },
+        "3": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        }
+      },
+      "infer": {
+        "0": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 0,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0,
+          "max_rel": 0.0,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 0,
+          "passed": true
+        }
+      },
+      "bwd_recompute": null,
+      "time_ms": {},
+      "sol_ms": {},
+      "roof_ms": {},
+      "error": null,
+      "skipped": null,
+      "warnings": [],
+      "compile": null,
+      "compile_error": null,
+      "contract": null,
+      "derived": {}
+    },
+    {
+      "name": "long_sequence",
+      "required": true,
+      "dtype": "bf16",
+      "fwd": {
+        "0": {
+          "max_abs": 0.0234375,
+          "max_rel": 0.1983642578125,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 156549120,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.015625,
+          "max_rel": 0.23257732391357422,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 156549120,
+          "passed": true
+        }
+      },
+      "bwd": {
+        "0": {
+          "max_abs": 0.015625,
+          "max_rel": 0.058650970458984375,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 156549120,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.03125,
+          "max_rel": 0.06103515625,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 156549120,
+          "passed": true
+        },
+        "2": {
+          "max_abs": 0.0645751953125,
+          "max_rel": 0.0015892971017830693,
+          "atol": 17.69458222168582,
+          "rtol": 0.016,
+          "reduced_over": 1223040,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        },
+        "3": {
+          "max_abs": 0.03912353515625,
+          "max_rel": 0.00020983025937535926,
+          "atol": 17.69458222168582,
+          "rtol": 0.016,
+          "reduced_over": 1223040,
+          "n_bad": 0,
+          "n": 128,
+          "passed": true
+        }
+      },
+      "infer": {
+        "0": {
+          "max_abs": 0.0234375,
+          "max_rel": 0.1983642578125,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 156549120,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.015625,
+          "max_rel": 0.23257732391357422,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 156549120,
+          "passed": true
+        }
+      },
+      "bwd_recompute": null,
+      "time_ms": {
+        "kernel_fwd": 0.9104795000000008,
+        "eager_fwd": 18.736356999999984,
+        "compiled_fwd": 2.2466669999999995,
+        "kernel_infer": 0.905820999999999,
+        "eager_infer": 18.74870600000002,
+        "compiled_infer": 2.062779,
+        "kernel_bwd": 1.3291485000000007,
+        "eager_bwd": 35.901204499999906,
+        "compiled_bwd": 2.9237510000000038
+      },
+      "sol_ms": {
+        "fwd": 0.6272321406151915,
+        "infer": 0.6224336472065285,
+        "bwd": 0.9358548650345261
+      },
+      "roof_ms": {
+        "fwd": 0.7373590000000003,
+        "infer": 0.7302234999999996,
+        "bwd": 1.09299
+      },
+      "error": null,
+      "skipped": null,
+      "warnings": [],
+      "compile": null,
+      "compile_error": null,
+      "contract": null,
+      "derived": {
+        "fwd": {
+          "sol_eff": 0.809857882577257,
+          "speedup": 2.4675646184235864
+        },
+        "bwd": {
+          "sol_eff": 0.822323464985289,
+          "speedup": 2.1997173378294463
+        },
+        "infer": {
+          "sol_eff": 0.8061454746577971,
+          "speedup": 2.277247933090536
+        }
+      }
+    }
+  ],
+  "samples": {
+    "user_train": {
+      "fwd": {
+        "kernel": [
+          0.10208000000000038,
+          0.08703999999999996,
+          0.0869429999999993
+        ],
+        "eager": [
+          2.0797209999999984,
+          1.8981714999999948,
+          1.8973229999999939
+        ],
+        "compiled": [
+          0.2047829999999999,
+          0.20491150000000016,
+          0.20495999999999992
+        ]
+      },
+      "infer": {
+        "kernel": [
+          0.09023950000000036,
+          0.08452750000000003,
+          0.08494350000000031
+        ],
+        "eager": [
+          1.8985570000000012,
+          1.898092499999999,
+          1.8972289999999994
+        ],
+        "compiled": [
+          0.19014299999999987,
+          0.19006350000000022,
+          0.18999950000000002
+        ]
+      },
+      "bwd": {
+        "kernel": [
+          0.14427149999999891,
+          0.14401600000000098,
+          0.14435149999999974
+        ],
+        "eager": [
+          3.8157949999999947,
+          3.8139269999999934,
+          3.8124215000000037
+        ],
+        "compiled": [
+          0.320384,
+          0.32068649999999943,
+          0.34156600000000015
+        ]
+      }
+    },
+    "small_tail": {
+      "fwd": {
+        "kernel": [
+          0.004063999999999851,
+          0.004048000000000001,
+          0.004047500000000127
+        ],
+        "eager": [
+          0.1377290000000021,
+          0.13785899999999895,
+          0.13782000000000122
+        ],
+        "compiled": [
+          0.004240000000000009,
+          0.004239999999999782,
+          0.004256000000000085
+        ]
+      },
+      "infer": {
+        "kernel": [
+          0.004,
+          0.004,
+          0.003984000000000151
+        ],
+        "eager": [
+          0.13812649999999985,
+          0.13768099999999914,
+          0.1377430000000004
+        ],
+        "compiled": [
+          0.004592000000000098,
+          0.00454400000000021,
+          0.004575999999999795
+        ]
+      },
+      "bwd": {
+        "kernel": [
+          0.005952000000000225,
+          0.0059360000000001495,
+          0.005935999999999922
+        ],
+        "eager": [
+          0.22753450000000794,
+          0.22747100000000225,
+          0.22755150000001162
+        ],
+        "compiled": [
+          0.010896500000000288,
+          0.010879499999999553,
+          0.010895999999999503
+        ]
+      }
+    },
+    "strided": {
+      "fwd": {
+        "kernel": [
+          0.004016000000000077,
+          0.004,
+          0.004
+        ],
+        "eager": [
+          0.14617250000000037,
+          0.14614300000000185,
+          0.14601400000000148
+        ],
+        "compiled": [
+          0.004319999999999937,
+          0.004160499999999956,
+          0.004271999999999707
+        ]
+      },
+      "infer": {
+        "kernel": [
+          0.0039039999999999964,
+          0.003888000000000034,
+          0.003888500000000022
+        ],
+        "eager": [
+          0.14641649999999617,
+          0.1460799999999981,
+          0.1460790000000018
+        ],
+        "compiled": [
+          0.004815999999999803,
+          0.00475200000000018,
+          0.004863999999999919
+        ]
+      },
+      "bwd": {
+        "kernel": [
+          0.005920499999999947,
+          0.005952499999999646,
+          0.005951499999999669
+        ],
+        "eager": [
+          0.22641250000000035,
+          0.22652999999999657,
+          0.22657250000000112
+        ],
+        "compiled": [
+          0.010815999999999576,
+          0.010864000000000033,
+          0.0107199999999998
+        ]
+      }
+    },
+    "zero_rows": {},
+    "long_sequence": {
+      "fwd": {
+        "kernel": [
+          0.9235970000000007,
+          0.9104795000000008,
+          0.9121904999999999
+        ],
+        "eager": [
+          18.736356999999984,
+          18.744690999999996,
+          18.74600199999997
+        ],
+        "compiled": [
+          2.247272999999999,
+          2.2466669999999995,
+          2.2473719999999995
+        ]
+      },
+      "infer": {
+        "kernel": [
+          0.9212770000000001,
+          0.9070055000000001,
+          0.905820999999999
+        ],
+        "eager": [
+          18.751967999999962,
+          18.74870600000002,
+          18.753990500000015
+        ],
+        "compiled": [
+          2.0639445,
+          2.062779,
+          2.0631635
+        ]
+      },
+      "bwd": {
+        "kernel": [
+          1.3291485000000007,
+          1.3343185000000006,
+          1.3348610000000005
+        ],
+        "eager": [
+          35.90463849999999,
+          35.906797500000074,
+          35.901204499999906
+        ],
+        "compiled": [
+          2.9237510000000038,
+          2.927240499999999,
+          2.9238814999999985
+        ]
+      }
+    }
+  },
+  "roof_analysis": {},
+  "baseline_checks": {
+    "user_train": {
+      "compiled": {
+        "fwd": {
+          "0": {
+            "max_abs": 0.03125,
+            "max_rel": 0.644683837890625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 14680064,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.03125,
+            "max_rel": 0.6389617919921875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 14680064,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.03125,
+            "max_rel": 0.644683837890625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 14680064,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.03125,
+            "max_rel": 0.6389617919921875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 14680064,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.03125,
+            "max_rel": 0.14340877532958984,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 14680064,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.03125,
+            "max_rel": 0.14781951904296875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 14680064,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.9820175170898438,
+            "max_rel": 0.17865473862301476,
+            "atol": 5.418498685060282,
+            "rtol": 0.016,
+            "reduced_over": 114688,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          },
+          "3": {
+            "max_abs": 1.22833251953125,
+            "max_rel": 0.14292853470858227,
+            "atol": 5.418498685060282,
+            "rtol": 0.016,
+            "reduced_over": 114688,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          }
+        }
+      }
+    },
+    "small_tail": {
+      "compiled": {
+        "fwd": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.16295909881591797,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.156402587890625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.16295909881591797,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.156402587890625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.03,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.019867549668874173,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.03296661376953125,
+            "max_rel": 0.014745257663759075,
+            "atol": 0.16159207901379324,
+            "rtol": 0.016,
+            "reduced_over": 102,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          },
+          "3": {
+            "max_abs": 0.03507804870605469,
+            "max_rel": 0.027148891855415837,
+            "atol": 0.16159207901379324,
+            "rtol": 0.016,
+            "reduced_over": 102,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          }
+        }
+      }
+    },
+    "strided": {
+      "compiled": {
+        "fwd": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.186920166015625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.133514404296875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.186920166015625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.133514404296875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.034332275390625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.030517578125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 13056,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.03402900695800781,
+            "max_rel": 0.07315353353072179,
+            "atol": 0.16159207901379324,
+            "rtol": 0.016,
+            "reduced_over": 102,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          },
+          "3": {
+            "max_abs": 0.03447866439819336,
+            "max_rel": 0.1347544124650145,
+            "atol": 0.16159207901379324,
+            "rtol": 0.016,
+            "reduced_over": 102,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          }
+        }
+      }
+    },
+    "zero_rows": {},
+    "long_sequence": {
+      "compiled": {
+        "fwd": {
+          "0": {
+            "max_abs": 0.03125,
+            "max_rel": 0.682830810546875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 156549120,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.03125,
+            "max_rel": 0.66375732421875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 156549120,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.03125,
+            "max_rel": 0.682830810546875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 156549120,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.03125,
+            "max_rel": 0.66375732421875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 156549120,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.03125,
+            "max_rel": 0.1983642578125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 156549120,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.03125,
+            "max_rel": 0.179290771484375,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 156549120,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 4.741943359375,
+            "max_rel": 0.10661398186909725,
+            "atol": 17.69458222168582,
+            "rtol": 0.016,
+            "reduced_over": 1223040,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          },
+          "3": {
+            "max_abs": 4.7386474609375,
+            "max_rel": 0.16147534503694158,
+            "atol": 17.69458222168582,
+            "rtol": 0.016,
+            "reduced_over": 1223040,
+            "n_bad": 0,
+            "n": 128,
+            "passed": true
+          }
+        }
+      }
+    }
+  },
+  "repeat_measurements": [
+    {
+      "verdict": "pass",
+      "reasons": [
+        "small_tail/bwd: SOL efficiency 0.52 not gated: latency-bound (roof 3.1 us < 10 us)"
+      ],
+      "workloads": [
+        {
+          "name": "small_tail",
+          "required": true,
+          "dtype": "bf16",
+          "fwd": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            }
+          },
+          "bwd": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 5.960464477539063e-08,
+              "max_rel": 3.725290298461914e-06,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 1.18034785148701e-05,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 5.459290073918788e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          },
+          "infer": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            }
+          },
+          "bwd_recompute": null,
+          "time_ms": {
+            "kernel_fwd": 0.0039680000000007565,
+            "eager_fwd": 0.13956999999999742,
+            "compiled_fwd": 0.004176000000000044,
+            "kernel_infer": 0.0038885000000002494,
+            "eager_infer": 0.1400795000000003,
+            "compiled_infer": 0.004560500000000047,
+            "kernel_bwd": 0.005920000000000073,
+            "eager_bwd": 0.2264319999999966,
+            "compiled_bwd": 0.010672500000000014
+          },
+          "sol_ms": {
+            "fwd": 5.852950408035154e-05,
+            "infer": 5.81293157564344e-05,
+            "bwd": 8.464375392341495e-05
+          },
+          "roof_ms": {
+            "fwd": 0.002959999999999866,
+            "infer": 0.0029434999999997445,
+            "bwd": 0.003071999999999662
+          },
+          "error": null,
+          "skipped": null,
+          "warnings": [],
+          "compile": null,
+          "compile_error": null,
+          "contract": null,
+          "derived": {
+            "fwd": {
+              "sol_eff": 0.7459677419353079,
+              "speedup": 1.0524193548385201
+            },
+            "bwd": {
+              "sol_eff": 0.5189189189188554,
+              "speedup": 1.8027871621621423
+            },
+            "infer": {
+              "sol_eff": 0.7569756975696427,
+              "speedup": 1.1728172817281097
+            }
+          }
+        }
+      ],
+      "samples": {
+        "small_tail": {
+          "fwd": {
+            "kernel": [
+              0.003984500000000025,
+              0.0039680000000007565,
+              0.003983999999999923
+            ],
+            "eager": [
+              0.13956999999999742,
+              0.1398065000000015,
+              0.1397595000000017
+            ],
+            "compiled": [
+              0.004224000000000046,
+              0.004176000000000044,
+              0.004208000000000027
+            ]
+          },
+          "infer": {
+            "kernel": [
+              0.0039039999999999964,
+              0.0039194999999997435,
+              0.0038885000000002494
+            ],
+            "eager": [
+              0.14030349999999908,
+              0.1400815000000009,
+              0.1400795000000003
+            ],
+            "compiled": [
+              0.0045760000000001355,
+              0.004576000000000022,
+              0.004560500000000047
+            ]
+          },
+          "bwd": {
+            "kernel": [
+              0.005920000000000073,
+              0.005935999999999695,
+              0.005968000000000188
+            ],
+            "eager": [
+              0.2264319999999966,
+              0.22651149999999734,
+              0.22646399999999903
+            ],
+            "compiled": [
+              0.010720000000000028,
+              0.010719499999999925,
+              0.010672500000000014
+            ]
+          }
+        }
+      },
+      "source_hashes": {
+        "golden/kernel.py": "6d47969daabec29596f88c38c21631bb6d7f40f0ea0d2df528ced7443641d3ba",
+        "golden/reference.py": "3a98dfc13b69a23de63e7a8a1aab903e4570daae39c094ab46befb6e59c5a1c0"
+      },
+      "validation_hashes": {
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "8cabd40935ca2bd3a949c7a7c698afb335c5f27384ed3a5aeff701372f2cc1ab",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "647465a47c68fc3aeb424a08de2320d30923f7efa20771592078d4ac5c6478d7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "fb8568b7258be31e07d11bcf1c30f05e88f42600f020251022bceb151563c60b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "813939ef97a115e146e00974b40bd5159a4923f3ba0d651bfc1ddf30e0ed9134",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269",
+        "tmp/examples-completion/cases/h3_qk_norm_mmrope.py": "df878cbb4a11b911a19c21e93942f405d981950e5ec18cf9101e082c5c45edae",
+        "tmp/examples-completion/run.py": "63fa76a27f8f20ed280ede6fa71eba0f207526f46aec05fac6941b79233d216e"
+      },
+      "baseline_checks": {
+        "small_tail": {
+          "compiled": {
+            "fwd": {
+              "0": {
+                "max_abs": 0.015625,
+                "max_rel": 0.16295909881591797,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.015625,
+                "max_rel": 0.156402587890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              }
+            },
+            "infer": {
+              "0": {
+                "max_abs": 0.015625,
+                "max_rel": 0.16295909881591797,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.015625,
+                "max_rel": 0.156402587890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              }
+            },
+            "bwd": {
+              "0": {
+                "max_abs": 0.015625,
+                "max_rel": 0.03,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.015625,
+                "max_rel": 0.019867549668874173,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "2": {
+                "max_abs": 0.03296661376953125,
+                "max_rel": 0.014745257663759075,
+                "atol": 0.16159207901379324,
+                "rtol": 0.016,
+                "reduced_over": 102,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              },
+              "3": {
+                "max_abs": 0.03507804870605469,
+                "max_rel": 0.027148891855415837,
+                "atol": 0.16159207901379324,
+                "rtol": 0.016,
+                "reduced_over": 102,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "verdict": "pass",
+      "reasons": [
+        "small_tail/bwd: SOL efficiency 0.52 not gated: latency-bound (roof 3.0 us < 10 us)"
+      ],
+      "workloads": [
+        {
+          "name": "small_tail",
+          "required": true,
+          "dtype": "bf16",
+          "fwd": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            }
+          },
+          "bwd": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 5.960464477539063e-08,
+              "max_rel": 3.725290298461914e-06,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 1.18034785148701e-05,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 5.459290073918788e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          },
+          "infer": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            }
+          },
+          "bwd_recompute": null,
+          "time_ms": {
+            "kernel_fwd": 0.003952000000000226,
+            "eager_fwd": 0.13960199999999987,
+            "compiled_fwd": 0.004159999999999968,
+            "kernel_infer": 0.003871999999999616,
+            "eager_infer": 0.14006650000000065,
+            "compiled_infer": 0.00457549999999992,
+            "kernel_bwd": 0.00588799999999992,
+            "eager_bwd": 0.22644600000000265,
+            "compiled_bwd": 0.010672000000000025
+          },
+          "sol_ms": {
+            "fwd": 5.852950408035154e-05,
+            "infer": 5.81293157564344e-05,
+            "bwd": 8.464375392341495e-05
+          },
+          "roof_ms": {
+            "fwd": 0.0030079999999998107,
+            "infer": 0.002928499999999986,
+            "bwd": 0.0030399999999999637
+          },
+          "error": null,
+          "skipped": null,
+          "warnings": [],
+          "compile": null,
+          "compile_error": null,
+          "contract": null,
+          "derived": {
+            "fwd": {
+              "sol_eff": 0.761133603238775,
+              "speedup": 1.0526315789473002
+            },
+            "bwd": {
+              "sol_eff": 0.5163043478260878,
+              "speedup": 1.8125000000000289
+            },
+            "infer": {
+              "sol_eff": 0.7563274793389143,
+              "speedup": 1.1816890495868733
+            }
+          }
+        }
+      ],
+      "samples": {
+        "small_tail": {
+          "fwd": {
+            "kernel": [
+              0.0039679999999998475,
+              0.003984000000000378,
+              0.003952000000000226
+            ],
+            "eager": [
+              0.13960199999999987,
+              0.1398080000000009,
+              0.13979200000000128
+            ],
+            "compiled": [
+              0.004320000000000164,
+              0.004159999999999968,
+              0.004192500000000109
+            ]
+          },
+          "infer": {
+            "kernel": [
+              0.0038879999999996925,
+              0.0038720000000002984,
+              0.003871999999999616
+            ],
+            "eager": [
+              0.1402869999999948,
+              0.14006650000000065,
+              0.14021100000000025
+            ],
+            "compiled": [
+              0.00457549999999992,
+              0.004592000000000098,
+              0.004576000000000022
+            ]
+          },
+          "bwd": {
+            "kernel": [
+              0.005920000000000073,
+              0.0059200000000003,
+              0.00588799999999992
+            ],
+            "eager": [
+              0.22657549999999582,
+              0.22644600000000265,
+              0.22654549999999746
+            ],
+            "compiled": [
+              0.010735999999999421,
+              0.01078400000000056,
+              0.010672000000000025
+            ]
+          }
+        }
+      },
+      "source_hashes": {
+        "golden/kernel.py": "6d47969daabec29596f88c38c21631bb6d7f40f0ea0d2df528ced7443641d3ba",
+        "golden/reference.py": "3a98dfc13b69a23de63e7a8a1aab903e4570daae39c094ab46befb6e59c5a1c0"
+      },
+      "validation_hashes": {
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "8cabd40935ca2bd3a949c7a7c698afb335c5f27384ed3a5aeff701372f2cc1ab",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "647465a47c68fc3aeb424a08de2320d30923f7efa20771592078d4ac5c6478d7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "fb8568b7258be31e07d11bcf1c30f05e88f42600f020251022bceb151563c60b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "813939ef97a115e146e00974b40bd5159a4923f3ba0d651bfc1ddf30e0ed9134",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269",
+        "tmp/examples-completion/cases/h3_qk_norm_mmrope.py": "df878cbb4a11b911a19c21e93942f405d981950e5ec18cf9101e082c5c45edae",
+        "tmp/examples-completion/run.py": "63fa76a27f8f20ed280ede6fa71eba0f207526f46aec05fac6941b79233d216e"
+      },
+      "baseline_checks": {
+        "small_tail": {
+          "compiled": {
+            "fwd": {
+              "0": {
+                "max_abs": 0.015625,
+                "max_rel": 0.16295909881591797,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.015625,
+                "max_rel": 0.156402587890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              }
+            },
+            "infer": {
+              "0": {
+                "max_abs": 0.015625,
+                "max_rel": 0.16295909881591797,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.015625,
+                "max_rel": 0.156402587890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              }
+            },
+            "bwd": {
+              "0": {
+                "max_abs": 0.015625,
+                "max_rel": 0.03,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.015625,
+                "max_rel": 0.019867549668874173,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 13056,
+                "passed": true
+              },
+              "2": {
+                "max_abs": 0.03296661376953125,
+                "max_rel": 0.014745257663759075,
+                "atol": 0.16159207901379324,
+                "rtol": 0.016,
+                "reduced_over": 102,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              },
+              "3": {
+                "max_abs": 0.03507804870605469,
+                "max_rel": 0.027148891855415837,
+                "atol": 0.16159207901379324,
+                "rtol": 0.016,
+                "reduced_over": 102,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "verdict": "pass",
+      "reasons": [],
+      "workloads": [
+        {
+          "name": "user_train",
+          "required": true,
+          "dtype": "bf16",
+          "fwd": {
+            "0": {
+              "max_abs": 0.015625,
+              "max_rel": 0.062111801242236024,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.016853932584269662,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            }
+          },
+          "bwd": {
+            "0": {
+              "max_abs": 0.015625,
+              "max_rel": 0.0152587890625,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.0514984130859375,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.017364501953125,
+              "max_rel": 0.00019566235494161057,
+              "atol": 5.418498685060282,
+              "rtol": 0.016,
+              "reduced_over": 114688,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 0.0147705078125,
+              "max_rel": 0.0015135657684264856,
+              "atol": 5.418498685060282,
+              "rtol": 0.016,
+              "reduced_over": 114688,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          },
+          "infer": {
+            "0": {
+              "max_abs": 0.015625,
+              "max_rel": 0.062111801242236024,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.016853932584269662,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            }
+          },
+          "bwd_recompute": null,
+          "time_ms": {
+            "kernel_fwd": 0.08708799999999928,
+            "eager_fwd": 1.8970365000000102,
+            "compiled_fwd": 0.2049114999999997,
+            "kernel_infer": 0.08478399999999987,
+            "eager_infer": 1.8960130000000082,
+            "compiled_infer": 0.19003100000000017,
+            "kernel_bwd": 0.14454399999999962,
+            "eager_bwd": 3.8064674999999952,
+            "compiled_bwd": 0.34158350000000015
+          },
+          "sol_ms": {
+            "fwd": 0.05881782799748902,
+            "infer": 0.05836785938480854,
+            "bwd": 0.08913496547394853
+          },
+          "roof_ms": {
+            "fwd": 0.07670450000000006,
+            "infer": 0.07596799999999984,
+            "bwd": 0.11244749999999999
+          },
+          "error": null,
+          "skipped": null,
+          "warnings": [],
+          "compile": null,
+          "compile_error": null,
+          "contract": null,
+          "derived": {
+            "fwd": {
+              "sol_eff": 0.8807700257211177,
+              "speedup": 2.352924627962537
+            },
+            "bwd": {
+              "sol_eff": 0.7779465076378147,
+              "speedup": 2.363180069736558
+            },
+            "infer": {
+              "sol_eff": 0.8960181166257779,
+              "speedup": 2.2413545008492224
+            }
+          }
+        }
+      ],
+      "samples": {
+        "user_train": {
+          "fwd": {
+            "kernel": [
+              0.10206399999999985,
+              0.08755299999999942,
+              0.08708799999999928
+            ],
+            "eager": [
+              2.07959599999999,
+              1.8970365000000102,
+              1.8983804999999956
+            ],
+            "compiled": [
+              0.20494449999999984,
+              0.2049114999999997,
+              0.20500800000000005
+            ]
+          },
+          "infer": {
+            "kernel": [
+              0.09025599999999986,
+              0.08478399999999987,
+              0.08497600000000011
+            ],
+            "eager": [
+              1.8960130000000082,
+              1.8969679999999953,
+              1.897726999999998
+            ],
+            "compiled": [
+              0.19003100000000017,
+              0.19006399999999984,
+              0.19016000000000008
+            ]
+          },
+          "bwd": {
+            "kernel": [
+              0.14454399999999962,
+              0.15540649999999961,
+              0.15542399999999998
+            ],
+            "eager": [
+              3.8064674999999952,
+              4.049291499999999,
+              4.046024999999983
+            ],
+            "compiled": [
+              0.34158350000000015,
+              0.34225499999999986,
+              0.3424780000000005
+            ]
+          }
+        }
+      },
+      "source_hashes": {
+        "golden/kernel.py": "6d47969daabec29596f88c38c21631bb6d7f40f0ea0d2df528ced7443641d3ba",
+        "golden/reference.py": "3a98dfc13b69a23de63e7a8a1aab903e4570daae39c094ab46befb6e59c5a1c0"
+      },
+      "validation_hashes": {
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "8cabd40935ca2bd3a949c7a7c698afb335c5f27384ed3a5aeff701372f2cc1ab",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "647465a47c68fc3aeb424a08de2320d30923f7efa20771592078d4ac5c6478d7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "fb8568b7258be31e07d11bcf1c30f05e88f42600f020251022bceb151563c60b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "813939ef97a115e146e00974b40bd5159a4923f3ba0d651bfc1ddf30e0ed9134",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269",
+        "tmp/examples-completion/cases/h3_qk_norm_mmrope.py": "df878cbb4a11b911a19c21e93942f405d981950e5ec18cf9101e082c5c45edae",
+        "tmp/examples-completion/run.py": "63fa76a27f8f20ed280ede6fa71eba0f207526f46aec05fac6941b79233d216e"
+      },
+      "baseline_checks": {
+        "user_train": {
+          "compiled": {
+            "fwd": {
+              "0": {
+                "max_abs": 0.03125,
+                "max_rel": 0.644683837890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.03125,
+                "max_rel": 0.6389617919921875,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              }
+            },
+            "infer": {
+              "0": {
+                "max_abs": 0.03125,
+                "max_rel": 0.644683837890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.03125,
+                "max_rel": 0.6389617919921875,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              }
+            },
+            "bwd": {
+              "0": {
+                "max_abs": 0.03125,
+                "max_rel": 0.14340877532958984,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.03125,
+                "max_rel": 0.14781951904296875,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "2": {
+                "max_abs": 0.9820175170898438,
+                "max_rel": 0.17865473862301476,
+                "atol": 5.418498685060282,
+                "rtol": 0.016,
+                "reduced_over": 114688,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              },
+              "3": {
+                "max_abs": 1.22833251953125,
+                "max_rel": 0.14292853470858227,
+                "atol": 5.418498685060282,
+                "rtol": 0.016,
+                "reduced_over": 114688,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "verdict": "pass",
+      "reasons": [],
+      "workloads": [
+        {
+          "name": "user_train",
+          "required": true,
+          "dtype": "bf16",
+          "fwd": {
+            "0": {
+              "max_abs": 0.015625,
+              "max_rel": 0.062111801242236024,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.016853932584269662,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            }
+          },
+          "bwd": {
+            "0": {
+              "max_abs": 0.015625,
+              "max_rel": 0.0152587890625,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.0514984130859375,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.017364501953125,
+              "max_rel": 0.00019566235494161057,
+              "atol": 5.418498685060282,
+              "rtol": 0.016,
+              "reduced_over": 114688,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 0.0147705078125,
+              "max_rel": 0.0015135657684264856,
+              "atol": 5.418498685060282,
+              "rtol": 0.016,
+              "reduced_over": 114688,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          },
+          "infer": {
+            "0": {
+              "max_abs": 0.015625,
+              "max_rel": 0.062111801242236024,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.016853932584269662,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 14680064,
+              "passed": true
+            }
+          },
+          "bwd_recompute": null,
+          "time_ms": {
+            "kernel_fwd": 0.09550349999999957,
+            "eager_fwd": 2.0777254999999997,
+            "compiled_fwd": 0.24831900000000018,
+            "kernel_infer": 0.09174399999999946,
+            "eager_infer": 2.078809999999999,
+            "compiled_infer": 0.23011099999999987,
+            "kernel_bwd": 0.15561599999999953,
+            "eager_bwd": 4.045764500000004,
+            "compiled_bwd": 0.3411994999999996
+          },
+          "sol_ms": {
+            "fwd": 0.05881782799748902,
+            "infer": 0.05836785938480854,
+            "bwd": 0.08913496547394853
+          },
+          "roof_ms": {
+            "fwd": 0.0771840000000002,
+            "infer": 0.07748749999999996,
+            "bwd": 0.1126880000000001
+          },
+          "error": null,
+          "skipped": null,
+          "warnings": [],
+          "compile": null,
+          "compile_error": null,
+          "contract": null,
+          "derived": {
+            "fwd": {
+              "sol_eff": 0.8081798049286208,
+              "speedup": 2.6001036611223807
+            },
+            "bwd": {
+              "sol_eff": 0.724141476454866,
+              "speedup": 2.1925733857701046
+            },
+            "infer": {
+              "sol_eff": 0.8446056417858433,
+              "speedup": 2.5081858214161277
+            }
+          }
+        }
+      ],
+      "samples": {
+        "user_train": {
+          "fwd": {
+            "kernel": [
+              0.10182499999999982,
+              0.09550349999999957,
+              0.0955359999999996
+            ],
+            "eager": [
+              2.0821565000000053,
+              2.0777254999999997,
+              2.0816279999999976
+            ],
+            "compiled": [
+              0.24839899999999987,
+              0.24831900000000018,
+              0.24841499999999997
+            ]
+          },
+          "infer": {
+            "kernel": [
+              0.09641600000000017,
+              0.09174399999999946,
+              0.09185599999999977
+            ],
+            "eager": [
+              2.078809999999999,
+              2.0808604999999964,
+              2.079757999999998
+            ],
+            "compiled": [
+              0.23011099999999987,
+              0.23033500000000004,
+              0.23027100000000042
+            ]
+          },
+          "bwd": {
+            "kernel": [
+              0.15593599999999946,
+              0.15561599999999953,
+              0.15591949999999952
+            ],
+            "eager": [
+              4.048071499999987,
+              4.045764500000004,
+              4.048005999999985
+            ],
+            "compiled": [
+              0.34158399999999917,
+              0.3421120000000003,
+              0.3411994999999996
+            ]
+          }
+        }
+      },
+      "source_hashes": {
+        "golden/kernel.py": "6d47969daabec29596f88c38c21631bb6d7f40f0ea0d2df528ced7443641d3ba",
+        "golden/reference.py": "3a98dfc13b69a23de63e7a8a1aab903e4570daae39c094ab46befb6e59c5a1c0"
+      },
+      "validation_hashes": {
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "8cabd40935ca2bd3a949c7a7c698afb335c5f27384ed3a5aeff701372f2cc1ab",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "647465a47c68fc3aeb424a08de2320d30923f7efa20771592078d4ac5c6478d7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "a0ad50640139a524f86591157145bf1d4674ea9c065bfea21558f0f7b04430c8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "fb8568b7258be31e07d11bcf1c30f05e88f42600f020251022bceb151563c60b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "813939ef97a115e146e00974b40bd5159a4923f3ba0d651bfc1ddf30e0ed9134",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269",
+        "tmp/examples-completion/cases/h3_qk_norm_mmrope.py": "df878cbb4a11b911a19c21e93942f405d981950e5ec18cf9101e082c5c45edae",
+        "tmp/examples-completion/run.py": "63fa76a27f8f20ed280ede6fa71eba0f207526f46aec05fac6941b79233d216e"
+      },
+      "baseline_checks": {
+        "user_train": {
+          "compiled": {
+            "fwd": {
+              "0": {
+                "max_abs": 0.03125,
+                "max_rel": 0.644683837890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.03125,
+                "max_rel": 0.6389617919921875,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              }
+            },
+            "infer": {
+              "0": {
+                "max_abs": 0.03125,
+                "max_rel": 0.644683837890625,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.03125,
+                "max_rel": 0.6389617919921875,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              }
+            },
+            "bwd": {
+              "0": {
+                "max_abs": 0.03125,
+                "max_rel": 0.14340877532958984,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "1": {
+                "max_abs": 0.03125,
+                "max_rel": 0.14781951904296875,
+                "atol": 0.016,
+                "rtol": 0.016,
+                "reduced_over": 1,
+                "n_bad": 0,
+                "n": 14680064,
+                "passed": true
+              },
+              "2": {
+                "max_abs": 0.9820175170898438,
+                "max_rel": 0.17865473862301476,
+                "atol": 5.418498685060282,
+                "rtol": 0.016,
+                "reduced_over": 114688,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              },
+              "3": {
+                "max_abs": 1.22833251953125,
+                "max_rel": 0.14292853470858227,
+                "atol": 5.418498685060282,
+                "rtol": 0.016,
+                "reduced_over": 114688,
+                "n_bad": 0,
+                "n": 128,
+                "passed": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "adjoint_checks": [
+    {
+      "op": "h3_qk_norm_mmrope",
+      "workload": "strided",
+      "kind": "multioutput_adjoint_side_check",
+      "passed": true,
+      "checks": {
+        "output_0_one_random": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 5.90173925743505e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        },
+        "output_0_one_sum": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 1.18034785148701e-05,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        },
+        "output_1_one_random": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0078125,
+              "max_rel": 0.0040650406504065045,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 7.377174071793812e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        },
+        "output_1_one_sum": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 8.909784511515718e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        },
+        "all_sum": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 1.18034785148701e-05,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 8.909784511515718e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        },
+        "all_broadcast": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 1.9073486328125e-06,
+              "max_rel": 6.639456664614431e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 5.7220458984375e-06,
+              "max_rel": 2.36069570297402e-05,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        },
+        "all_batch_broadcast": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 13056,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 3.814697265625e-06,
+              "max_rel": 1.9180652586663913e-05,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            },
+            "3": {
+              "max_abs": 3.0994415283203125e-06,
+              "max_rel": 1.4169980966173066e-06,
+              "atol": 0.16159207901379324,
+              "rtol": 0.016,
+              "reduced_over": 102,
+              "n_bad": 0,
+              "n": 128,
+              "passed": true
+            }
+          }
+        }
+      },
+      "output_shapes": [
+        [
+          2,
+          3,
+          17,
+          128
+        ],
+        [
+          2,
+          3,
+          17,
+          128
+        ]
+      ],
+      "grad_reductions": [
+        1,
+        1,
+        102,
+        102
+      ],
+      "dtype": "bf16",
+      "torch": "2.11.0+cu128",
+      "source_hashes": {
+        "golden/kernel.py": "6d47969daabec29596f88c38c21631bb6d7f40f0ea0d2df528ced7443641d3ba",
+        "golden/reference.py": "3a98dfc13b69a23de63e7a8a1aab903e4570daae39c094ab46befb6e59c5a1c0"
+      }
+    }
+  ]
+}

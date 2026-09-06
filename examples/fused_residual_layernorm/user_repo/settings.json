@@ -1,0 +1,19 @@
+{
+  "model": {
+    "vocab_size": 256,
+    "num_classes": 32,
+    "d_model": 2048,
+    "n_layers": 2,
+    "n_heads": 16,
+    "seq_len": 2048,
+    "mlp_ratio": 2,
+    "norm_eps": 1e-05
+  },
+  "batch_size": 4,
+  "steps": 50,
+  "lr": 0.0003,
+  "weight_decay": 0.01,
+  "grad_clip": 1.0,
+  "seed": 0,
+  "autocast_dtype": "bf16"
+}

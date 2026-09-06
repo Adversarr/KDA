@@ -1,25 +1,45 @@
-# minivggt
+# VGGT padded attention training repository
 
-A VGGT-style multi-view transformer core (the released aggregator's structure: camera + register
-tokens per view, alternating *frame* blocks that attend inside each view and *global* blocks that
-attend over every token of every view) trained on random DINOv2-sized patch tokens. It exists to
-have a realistic training loop around the fusable pieces of `minivggt/model.py`, each a plain
-function:
+Variable-validity multi-view feature reconstruction.
 
-| function | what it does | called per block pair |
-|---|---|---|
-| `qkv_prep` | `(B, N, 3, H, d)` projection output -> q, k with per-head affine LayerNorm + 2-D RoPE, v re-laid out; all `(B, H, N, d)` | 2 |
-| `padded_attention` | dense non-causal attention, per-batch key-validity mask, fp32 logits/softmax (`attention_impl = "eager"`; `"sdpa"` is the library path) | 2 |
-| `layerscale_residual_layernorm` | `x + gamma * branch` (fp32 residual stream, padded rows zeroed) and the LayerNorm feeding the next branch | 4 |
-| `mlp_fc1_gelu` | first MLP GEMM + bias + exact GELU | 2 |
+This is an ordinary eager PyTorch training repository. It runs independently with Python and
+PyTorch on a CUDA GPU, without downloaded data or pretrained weights. Synthetic data is
+generated from a fixed seed. No kernel package is required.
+
+## Run
+
+From this directory, run a bounded training check:
 
 ```bash
-python train_smoke.py --steps 50                # prints per-step loss/time, then median_step_ms and final_loss
-python train_smoke.py --steps 50 --attention sdpa
+python -m multiview.train --smoke --steps 3 --seed 0
 ```
 
-Configuration is `minivggt/config.py` (`ModelConfig`, `TrainConfig`): bf16 autocast, batch 1,
-4 views of a `37 x 37` patch grid (518 x 518 at patch 14) = 1369 patches + 1 camera + 4 register
-tokens = 1374 tokens per view, 5496 tokens in the global block; `dim` 1024, 16 heads of dim 64,
-MLP hidden 4096, one (frame, global) block pair. The smoke run pads the last 37 patches of view
-1 and the whole of the last view, so the validity masks are live.
+For the representative workload described in the task:
+
+```bash
+python -m multiview.train --steps 50 --seed 0
+```
+
+`--smoke` reduces batch size, token count and/or depth while retaining the target's channel
+widths and head dimensions. It is a correctness smoke, not the representative benchmark. The
+final two lines are `median_step_ms` and `final_loss`. Timing includes backward and the
+optimizer update, uses CUDA synchronization, and discards the first ten steps when available.
+`--steps` must be positive. The training loop rejects non-finite losses.
+
+Frame attention folds views into the batch; global attention flattens them into the token axis.
+`--attention sdpa` selects the library comparison path.
+
+## Code
+
+The selected operation is defined in `multiview/attention.py`. Configuration lives in
+`multiview/config.py`. The surrounding model calls the operation in its real forward path; the
+loss, backward and optimizer exercise its trainable parameters.
+
+- `multiview/attention.py`
+- `multiview/blocks.py`
+- `multiview/collate.py`
+- `multiview/config.py`
+- `multiview/embedding.py`
+- `multiview/encoder.py`
+- `multiview/mlp.py`
+- `multiview/train.py`

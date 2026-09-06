@@ -4,8 +4,13 @@ the sublayer output into the fp32 residual stream and RMS-normalises the result 
 sublayer, returning both the new stream and the normalised bf16 view.
 
 Training config is `minilm/config.py` (`TrainConfig`, `ModelConfig`): bf16 autocast, batch 8,
-sequence 512, `d_model` 1024, 4 layers. The smoke run is `python train_smoke.py --steps 50`; it prints `median_step_ms` and `final_loss`.
+sequence 512, `d_model` 1024, 4 layers. The training run is `python train_smoke.py --steps 50`;
+it prints `median_step_ms` and `final_loss`.
 
 Please take it all the way: spec, kernel with a fused backward, verification and benchmark
 against speed of light, and integrate it into `minilm/model.py` behind a flag so I can switch
 back to the eager code. I care most about the shapes the config actually uses.
+
+For a bounded correctness smoke, run `python train_smoke.py --smoke --steps 3 --seed 0` from
+`user_repo/`. This keeps target channel/head dimensions but reduces batch/token counts; use the
+unmodified representative config for performance measurements.

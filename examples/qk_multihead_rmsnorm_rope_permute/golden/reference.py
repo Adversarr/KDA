@@ -1,4 +1,4 @@
-"""Eager reference: verbatim ``minilm/model.py`` (``rmsnorm_per_head``, ``apply_rope``, ``qk_prep``) from the user repo."""
+"""Eager reference: verbatim ``minilm/attention.py`` (``rmsnorm_per_head``, ``apply_rope``, ``qk_prep``) from the user repo."""
 
 from typing import Tuple
 

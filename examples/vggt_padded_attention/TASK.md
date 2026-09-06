@@ -1,5 +1,5 @@
-I am training a VGGT-style multi-view transformer (`minivggt/model.py`) and the attention is
-the bottleneck of the global block: `padded_attention` materialises the fp32 `(B, H, N, N)`
+I am training a VGGT-style multi-view transformer (`multiview/attention.py`) and the attention
+is the bottleneck of the global block: `padded_attention` materialises the fp32 `(B, H, N, N)`
 logits. I want it as one fused flash-style kernel, forward and backward.
 
 ```python
@@ -12,8 +12,8 @@ def padded_attention(q, k, v, key_valid):
     return torch.matmul(prob, v.float()).to(v.dtype)
 ```
 
-Dense and non-causal; the only mask is *key validity per batch entry*: padded patches and
-padded views are keys nobody may attend to, and every query row of a batch entry shares the same
+Dense and non-causal; the only mask is *key validity per batch entry*: padded patches and padded
+views are keys nobody may attend to, and every query row of a batch entry shares the same
 allowed key set, so the mask is the `(B, N)` vector, never an `(N, N)` plane. `key_valid` is
 already sanitised before the call (`key_valid_from_token_valid`: a view with no valid token gets
 key 0 as a dummy), so every row has at least one allowed key and the `nan_to_num` never fires in
@@ -23,20 +23,22 @@ q, k, v arrive as bf16).
 
 The kernel is called twice per block pair with very different shapes: the frame block folds the
 views into the batch (`B * S` sequences of `T` tokens), the global block sees every token of
-every view (`B` sequences of `S * T`). Training config is `minivggt/config.py` (`TrainConfig`,
-`ModelConfig`): bf16 autocast, batch 1, 4 views of a `37 x 37` patch grid, `T` = 1374 tokens
-per view (1 camera + 4 register + 1369 patches), so the global block runs at `N` = 5496, `dim`
-1024 = 16 heads x 64. Real runs use 2 scenes of up to 24 views (global `N` above 30k) and
-mixed image sizes, so `T` is not a multiple of anything convenient and the padding fraction
-varies; the kernel has to be correct there too. The smoke run is `python train_smoke.py --steps
-50`; it prints `median_step_ms` and `final_loss`.
-`--attention sdpa` runs the library path for comparison.
+every view (`B` sequences of `S * T`). Training config is `multiview/config.py` (`TrainConfig`,
+`ModelConfig`): bf16 autocast, batch 1, 4 views of a `37 x 37` patch grid, `T` = 1374 tokens per
+view (1 camera + 4 register + 1369 patches), so the global block runs at `N` = 5496, `dim` 1024
+= 16 heads x 64. Real runs use 2 scenes of up to 24 views (global `N` above 30k) and mixed image
+sizes, so `T` is not a multiple of anything convenient and the padding fraction varies; the
+kernel has to be correct there too. The training run is `python -m multiview.train --steps 50`;
+it prints `median_step_ms` and `final_loss`. `--attention sdpa` runs the library path for
+comparison.
 
 Please take it all the way: spec, kernel with the backward (`dq`, `dk`, `dv`), verification and
 benchmark against speed of light and against `torch.compile` and
 `F.scaled_dot_product_attention` with the boolean mask (`sdpa_attention` in the same file), and
-integrate it into `minivggt/model.py` behind a flag so I can switch back to the eager code. The
-q/k/v preparation in front of it (`qkv_prep`: per-head LayerNorm and 2-D RoPE) stays as it is;
-do not fuse it into this kernel.
+integrate it into `multiview/attention.py` behind a flag so I can switch back to the eager code.
+The q/k/v preparation in front of it (`qkv_prep`: per-head LayerNorm and 2-D RoPE) stays as it
+is; do not fuse it into this kernel.
 
-Status: TASK, user_repo.
+For a bounded correctness smoke, run `python -m multiview.train --smoke --steps 3 --seed 0` from
+`user_repo/`. This keeps target channel/head dimensions but reduces batch/token counts; use the
+unmodified representative config for performance measurements.

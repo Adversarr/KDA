@@ -22,13 +22,22 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--smoke", action="store_true", help="Short sequence/batch; keep production channel widths")
     args = p.parse_args()
 
     cfg = TrainConfig()
+    if args.smoke:
+        cfg.batch_size = 1
+        cfg.model.seq_len = 31
+        cfg.model.n_layers = 1
+
     if args.steps is not None:
         cfg.steps = args.steps
     if args.seed is not None:
         cfg.seed = args.seed
+
+    if cfg.steps < 1:
+        p.error("--steps must be positive")
 
     torch.manual_seed(cfg.seed)
     device = torch.device("cuda")
@@ -46,6 +55,8 @@ def main() -> None:
         t0 = time.perf_counter()
         with torch.autocast("cuda", dtype=dtype, enabled=dtype != torch.float32):
             loss = model(tokens[:, :-1], tokens[:, 1:], compute_dtype=dtype)
+        if not torch.isfinite(loss):
+            raise RuntimeError("non-finite training loss")
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
         opt.step()

@@ -1,0 +1,77 @@
+# Golden: Shared RMSNorm + half-pairing RoPE + permute
+
+Hand-written target for `decoder/attention.py::qk_prep` in the example's `user_repo/`.
+
+Derived from the product's standalone RMSNorm/RoPE fusion exemplar. Each launch processes q or k
+with a tile of heads from one token, shares that token's rotary-table row across heads, and
+stores directly in head-major order. RMSNorm output is rounded to bf16 before RoPE, matching the
+eager graph. The saved auxiliary is one fp32 inverse standard deviation per head row.
+
+Backward gathers arbitrary-stride head-major upstream gradients, applies inverse rotation,
+rounds that adjoint to bf16, and computes the RMSNorm adjoint. A bounded grid loops over tokens,
+reduces shared weight gradients over heads in registers and then reduces per-program partials.
+Representative shapes use separate Q and K launches. Small rows use a fused Q/K path and direct
+final weight-gradient ownership.
+
+## Contract
+
+The standalone kernel imports only PyTorch and Triton. Inputs and upstream gradients use their
+own leading strides, including broadcast gradients. Last-dimension activation storage is
+contiguous. Row/base offsets use int64, tails are masked, and empty inputs return without a
+zero-grid launch. Forward auxiliaries are allocated and written only when a backward can follow.
+
+## A800 measurements
+
+B8 S2048 H32 D128, bf16 q/k with shared fp32 head weights.
+
+Device time from `torch.profiler` on NVIDIA A800-SXM4-80GB, torch 2.11.0+cu128. Entries were
+timed round-robin, taking the minimum of three rounds. Roof percentages use a measured same-size
+copy, with byte accounting below; these are measurements on this device, not a performance
+promise elsewhere.
+
+| Phase | Golden | Eager | Compiled | SoL |
+|---|---:|---:|---:|---:|
+| forward (training) | 0.3221 ms | 8.4639 ms | 0.8060 ms | 98.1% |
+| forward (inference) | 0.3208 ms | 8.4668 ms | 0.6238 ms | 98.0% |
+| backward | 0.5881 ms | 13.7416 ms | 1.1866 ms | 79.8% |
+
+Final verdict: **pass**. The fresh full report covers 4 workloads, including every required
+output, inference and gradient check. Independent adjoints also pass. All numerical results,
+per-workload timings, copy roofs and raw rounds are recorded in `golden.json`; the recorded
+kernel and reference hashes match these sources. Small latency-bound rows retain the runtime's
+10-us SoL waiver and 1-us absolute baseline parity rule.
+
+## Traffic and arithmetic
+
+`C` denotes activation elements and `R` rows unless defined otherwise; `D` is the channel width
+and `P` the reduction programs. Parameters and positional tables count once as compulsory
+traffic. Partial buffers count both their write and subsequent reduction read; final
+parameter-gradient stores are included. Transcendental instruction cost is not represented by an
+invented FLOP multiplier.
+
+Let `C=B*S*H*D` and `R=B*S*H` for one tensor. Combined q+k forward bytes: `8*C + 8*D + 4*S*D +
+8*R`; inference omits `8*R`. Backward bytes: `12*C + 8*R + 4*S*D + 16*D + 16*P*D`,
+`P=min(B*S,2*SMs)`, or P=0 for the direct small reduction at R<=128 and D=128. Arithmetic
+estimates for both tensors: `2*(7*C+R)` forward and `24*C` backward.
+
+## What to check in a candidate
+
+The pairing is rotate-half, not interleaved. Norm weights are shared `(D,)`, unlike the GQA
+example's per-head weights. Ignoring either storage-dtype rounding boundary changes the
+numerical graph. A pre-permute copy defeats the fused-store advantage.
+
+## Reproduce the checks
+
+From the checkout root, using the GPU Python interpreter:
+
+```bash
+python examples/qk_rmsnorm_rope_permute/benchmark.py --verify --json tmp/golden-benchmarks/qk_rmsnorm_rope_permute/verify.json
+python examples/qk_rmsnorm_rope_permute/benchmark.py --bench --json tmp/golden-benchmarks/qk_rmsnorm_rope_permute/report.json
+python examples/qk_rmsnorm_rope_permute/benchmark.py --adjoint --json tmp/golden-benchmarks/qk_rmsnorm_rope_permute/adjoint.json
+```
+
+[Workloads and SoL accounting](../benchmark_cases.py) define the inputs, gradient reductions,
+and per-phase bytes/FLOPs. The [shared runner](../../_benchmark.py) uses KDA's product runtime
+directly. Reports are generated outside `golden/`; new numerical and timing reports require an
+independent acceptance audit. Use a distinct output filename for scoped `--workload` or
+`--fwd-only` runs.

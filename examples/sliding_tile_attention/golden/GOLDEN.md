@@ -1,83 +1,96 @@
 # Golden: Sliding Tile Attention (`sliding_tile_attention`)
 
-Hand-written target for `sliding_tile_attention` in `user_repo/minista/model.py`: attention over
-a video sequence in 384-token tile order plus text, masked by a per-head `(H, NT, NT)` tile mask
-(window centred on the query tile, text keys visible to all, text queries see all), softmax in
-fp32. Recorded A800 reference measurements are below.
+Hand-written target for `sliding_tile_attention` in `user_repo/sta/attention.py`: video tokens
+in tile order plus text, with a per-head tile mask. Text queries see all keys and text keys are
+visible to every query. This withheld solution remains **incomplete** because real-model
+performance evidence is missing.
 
 ## Design
 
-`kernel.py` is the FA2 reference (`kda-kernel-implement/reference/triton/attention/fa2_causal/`:
-log2-domain online softmax, deterministic two-kernel backward with `P` recomputed from `lse`,
-int64 `(b, h)` base + int32 in-loop offsets) with the causal loop bounds replaced by **block
-lists built on the host from the tile mask**, once per (mask, shape, block geometry):
+A streaming FA2 kernel traverses cached per-head lists of allowed key blocks. Fully visible
+blocks come first and need no element mask; partially visible blocks reconstruct the tile
+predicate. A heavy-first permutation schedules long lists before short ones so heterogeneous
+head windows do not leave a long GPU tail. The cache retains the mask owner and its version;
+in-place mutation invalidates lists, and inference tensors without version counters are not
+cached.
 
+Forward uses 128 query rows, 128 keys, 8 warps and 2 stages. Three stages exceed the
+shared-memory limit with indirect K/V addresses. A fully denied initial tile keeps a finite
+running softmax state until a visible tile arrives. Inference omits normalizer storage. Backward
+consists of preprocessing and deterministic dK/dV and dQ kernels: 64 owned rows by 64 streamed
+rows, 4 warps and 2 stages. The extra tuning round selects 32-by-32 tiles and 4 warps for
+sequences of at most 512 tokens; the normal model geometry is unchanged.
+
+Contract: the eager bf16 QK product rounds before fp32 scaling and softmax; its probability
+gradient also rounds before the softmax adjoint. Both boundaries are explicit. An independent
+sum/random/broadcast adjoint audit exposed the missing rounding in the earlier version; the
+corrected version passes that audit. Inputs preserve batch/head/row strides and require a unit
+final stride. Outputs and input gradients retain their storage dtype; the mask has no gradient.
+No gradient atomics or token-by-token mask allocation are used.
+
+## A800 measurements
+
+Profiler device times on 2026-09-06, minimum of three interleaved rounds with fresh compiler
+state per workload. All eligible baselines are checked numerically before timing. Full
+comparisons and raw samples are in `golden.json`.
+
+| Workload / phase | Golden | Eager | Compiled | SDPA | Achievable roof | SoL |
+|---|---:|---:|---:|---:|---:|---:|
+| user_train / fwd | 0.880432 ms | 35.304652 ms | 7.210048 ms | 15.549838 ms | 0.768652 ms | 0.873 |
+| user_train / bwd | 2.884544 ms | 37.518259 ms | 11.211778 ms | 20.040211 ms | 2.128463 ms | 0.738 |
+| user_train / infer | 0.885902 ms | 35.305677 ms | 6.472415 ms | 15.550059 ms | 0.768567 ms | 0.868 |
+
+The primary passes output, inference, gradient, SoL and baseline checks. Compiled eager is its
+strongest eligible baseline, giving 8.189x forward, 3.887x backward and 7.306x inference
+speedups. The required real-model case has 24 heads and 115456 tokens: eight heads each use
+`(3,3,3)`, `(3,6,10)` and `(5,6,10)` windows on a `(5,6,10)` grid, with 384 tokens per tile and
+256 text tokens. Its allowed-pair density is 56.53%; the earlier rough 5–15% estimate does not
+describe this case. All three workloads pass output, inference and gradient checks in a separate
+final numerical run, and fresh independent adjoints pass. The 439-token text tail is an optional
+diagnostic. Real-model profiling was interrupted in the first forward round after more than ten
+minutes without completed round progress: the GPU was idle while raw Kineto event processing
+held about 60 GB of host memory. Its performance and calibrated roof remain incomplete; no
+partial timing is accepted.
+
+The real model has 180841611264 allowed pairs. Its useful forward/backward work is
+92.591/231.477 trillion FLOPs. Compulsory traffic including scheduling metadata is 2.893 GB
+training forward, 2.882 GB inference and 9.636 GB backward (decimal units). These static counts
+do not substitute for the missing achievable-roof calibration. The additional tuning round is
+exhausted.
+
+For `R=B*H*S` and `C=R*D`, activation traffic is `8*C` forward, plus `4*R` for training
+normalizers, and `26*C+20*R` backward across its three kernels. The canonical script now adds
+consumed sparse-list/count/permutation entries, boundary mask reads and the backward
+mask-transpose copy. Useful compute counts allowed pairs only: `4*D` per pair forward and the
+existing `10*D` backward roof. Split backward repeats QK and dP products, executing `14*D` per
+pair before tail overhead. This overhead does not increase the useful-work roof. Large-workload
+coverage is assessed separately from the primary result.
+
+## Roof-model audit
+
+The achievable roof is `max(copy_ms, density * dense_flash_phase_ms)`, calibrated with the same
+Q/K/V geometry and storage dtype for each phase. Datasheet bounds remain separate. The
+useful-work numerator excludes duplicated products, sparse scheduling overhead and precision
+emulation. This calibration estimates throughput; it is not an exact sparse-latency prediction
+or a correctness reference. See the [SoL audit](../../BENCHMARKING.md).
+
+Both normal model workloads are required. The 70% SoL and 95% baseline gates remain unchanged;
+roofs below 10 microseconds retain the SoL waiver and existing 1-microsecond absolute baseline
+allowance. Missing profiler evidence remains incomplete, and optional stress failures cannot
+waive a required model row.
+
+## Reproduce the checks
+
+From the checkout root, using the GPU Python interpreter:
+
+```bash
+python examples/sliding_tile_attention/benchmark.py --verify --json tmp/golden-benchmarks/sliding_tile_attention/verify.json
+python examples/sliding_tile_attention/benchmark.py --bench --json tmp/golden-benchmarks/sliding_tile_attention/report.json
+python examples/sliding_tile_attention/benchmark.py --adjoint --json tmp/golden-benchmarks/sliding_tile_attention/adjoint.json
 ```
-any[h, i, j]   some (query in Q block i, key in K block j) pair is allowed
-full[h, i, j]  every pair is allowed             -> no element mask in the kernel
-idx[h, i, :]   allowed j's, full ones first;  n_full[h, i], n_any[h, i]
-perm           (head, block) rows sorted by n_any descending -> program order
-```
 
-The kernel runs an unmasked loop over `idx[:n_full]` and a masked loop over `idx[n_full:n_any]`;
-the masked loop rebuilds the token mask from the tile mask with one 128 x 128 gather per block
-(`tile_mask[h, m // ts, n // ts] | m >= V | n >= V`, and `n < S`). With `tile_size = 384 = 3 x 128`
-every 128-row video block lies inside one tile, so the only partial blocks are a K block that
-crosses `S` (when `text_len % 128 != 0`); the masked loop is empty or one block long and its
-cost is invisible. Partial *video* blocks (tile size not a multiple of the block, such as
-200 tokens) go through the same path and stay exact. The dK/dV kernel uses the transposed lists
-(per K block, the Q blocks that attend to it) and the transposed tile mask for its gather.
-
-Three things the causal reference did not need:
-
-- **Heavy-first program order.** The windows differ per head: in the smoke config head 0 attends
-  to all 27 tiles and head 7 to one, so a natural `(Q block, head)` grid leaves the last wave to
-  the dense heads. Launching the longest lists first (the `perm` table, grid `(H * NQB, B)`)
-  took the forward from 1.22 to 0.85 ms and the backward from 3.53 to 2.70 ms. This is the
-  single largest lever on any block-sparse attention with heterogeneous heads.
-- **Fully-denied rows.** A partial block can deny a whole row (the causal diagonal never does);
-  before any block has contributed, `m_new = -inf` and `exp2(m - m_new)` is NaN. The masked path
-  substitutes 0 for `-inf` in the subtraction.
-- **Shared memory.** The 128 x 128 x 128 forward tile pipelines 3 stages in the causal kernel;
-  with indirect K,V addresses Triton keeps one more tile in flight and 3 stages need 192 KB
-  (> 167 KB on A800). 2 stages; `BLOCK_N = 64` with 3 stages is 10% slower.
-
-The mask is never materialised at token granularity. The largest mask-derived tensor is `idx`,
-`H x NQB x max_nnz` int32; `max_nnz` is the full row count because text queries attend to every
-key, so it is 24 x 902 x 902 = 75 MB at HunyuanVideo size (a token mask there would be 24 x
-115456^2 = 320 GB). The lists are cached by mask pointer and geometry, so a training loop
-builds them once. Work is proportional to the
-attended area: 31% of the plane in the smoke config, 43% in the large workload below, 5-15% with the
-paper's windows on real videos.
-
-Contract: `q, k, v` are `(B, H, S, D)` with unit stride in `D`; a `(B, S, H, D)` projection viewed
-as `(B, H, S, D)` (the model's fused QKV) runs without a copy. `S` need not be a block multiple;
-`D <= 256`. The backward is bitwise deterministic (no atomics).
-`dq, dk, dv` come back in the storage dtype;
-the mask has no gradient.
-
-## A800, user workload B1 H8 S10496 D128 bf16, 31.3% attended
-
-Device time from `torch.profiler`, min of three interleaved rounds; the
-GPU is unlocked, compare within the table. FLOP rate counts the attended pairs only (`4 D` per
-pair forward, `10 D` backward). `eager` is the user's function (materialised fp32 scores), `sdpa`
-is `F.scaled_dot_product_attention` with the boolean token mask (the efficient-attention kernel;
-FA2 refuses a mask), `compile` is `torch.compile` of the eager function. 2026-09-04.
-
-| | fwd ms | TFLOP/s | bwd ms | TFLOP/s |
-|---|---|---|---|---|
-| **golden** (block-sparse FA2, heavy-first) | **0.848** | 167 | **2.700** | 131 |
-| golden, natural program order | 1.222 | 116 | 3.527 | 100 |
-| sdpa + token mask | 15.55 | 9 | 20.13 | 18 |
-| torch.compile (eager fn) | 10.33 | 14 | 11.42 | 31 |
-| eager (materialised scores) | 35.31 | 4 | 37.50 | 9 |
-
-Speed-up over the strongest torch baseline (sdpa with the mask): 18.3x forward, 7.5x backward;
-over the user's eager code: 42x / 14x. Against the achievable roof for this row (cuBLAS on the
-same-FLOP cube, 0.62 ms fwd / 1.24 ms bwd) the golden is `sol_eff` 0.73 forward and 0.46
-backward, the same fractions the dense FA2 reference reaches at this head dim (the deterministic
-backward recomputes `QK^T` twice, 5 GEMMs for the 2.5x FLOP count).
-
-HunyuanVideo size (`B1 H24 S115456 D128`, tile grid 5 x 6 x 10, windows `(3,3,3)`,
-`(3,5,9)`, `(5,5,9)`, 43% attended, no eager path can allocate the scores): forward 396 ms =
-179 TFLOP/s (57% of peak); the lists for that shape are 75 MB and take ~170 ms to build, once.
+[Workloads and SoL accounting](../benchmark_cases.py) define the inputs, gradient reductions,
+and per-phase bytes/FLOPs. The [shared runner](../../_benchmark.py) uses KDA's product runtime
+directly. Reports are generated outside `golden/`; new numerical and timing reports require an
+independent acceptance audit. Use a distinct output filename for scoped `--workload` or
+`--fwd-only` runs.

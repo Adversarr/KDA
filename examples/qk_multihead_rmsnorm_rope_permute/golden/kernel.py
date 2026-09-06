@@ -51,7 +51,8 @@ def _fused_fwd_kernel(
     x = tl.load(x_ptr + b * sx_b + s * sx_s + offs_h[:, None] * sx_h + offs_d[None, :], mask=mask, other=0.0).to(COMPUTE)
     w = tl.load(w_ptr + offs_h[:, None] * D + offs_d[None, :], mask=mask, other=0.0).to(COMPUTE)
     rstd = tl.rsqrt(tl.sum(x * x, axis=1) / D + eps)  # [BLOCK_H]
-    n = x * rstd[:, None] * w
+    # Preserve the eager normalization output boundary before rotary arithmetic.
+    n = (x * rstd[:, None] * w).to(x_ptr.dtype.element_ty).to(COMPUTE)
 
     # --- interleaved rope in registers ---
     cos = tl.load(cos_ptr + s * (D // 2) + offs_p, mask=pmask, other=0.0).to(COMPUTE)[None, :]
@@ -69,7 +70,7 @@ def _fused_bwd_kernel(
     dy_ptr, x_ptr, w_ptr, cos_ptr, sin_ptr, rstd_ptr, dx_ptr, dw_partial_ptr,
     T, S, H, D,
     sx_b, sx_s, sx_h,
-    sdy_b, sdy_h, sdy_s,
+    sdy_b, sdy_h, sdy_s, sdy_d,
     BLOCK_H: tl.constexpr, BLOCK_DH: tl.constexpr, COMPUTE: tl.constexpr,
 ):
     # A fixed grid strides over the T = B*S tokens, every head of a token per step, so the
@@ -90,11 +91,11 @@ def _fused_bwd_kernel(
         b = t // S
         s = t % S
         # adjoint of the permuted store: gather dy from (B, H, S, D) through its strides
-        dy = tl.load(dy_ptr + b * sdy_b + offs_h[:, None] * sdy_h + s * sdy_s + offs_d[None, :], mask=mask, other=0.0).to(COMPUTE)
+        dy = tl.load(dy_ptr + b * sdy_b + offs_h[:, None] * sdy_h + s * sdy_s + offs_d[None, :] * sdy_d, mask=mask, other=0.0).to(COMPUTE)
         # adjoint of rope: rotate by -angle
         cos = tl.load(cos_ptr + s * (D // 2) + offs_p, mask=pmask, other=0.0).to(COMPUTE)[None, :]
         sin = tl.load(sin_ptr + s * (D // 2) + offs_p, mask=pmask, other=0.0).to(COMPUTE)[None, :]
-        dn = _rotate(dy, cos, -sin, BLOCK_H, BLOCK_DH)
+        dn = _rotate(dy, cos, -sin, BLOCK_H, BLOCK_DH).to(x_ptr.dtype.element_ty).to(COMPUTE)
         # rmsnorm backward with the saved rstd
         x = tl.load(x_ptr + b * sx_b + s * sx_s + offs_h[:, None] * sx_h + offs_d[None, :], mask=mask, other=0.0).to(COMPUTE)
         rstd = tl.load(rstd_ptr + t * H + offs_h, mask=hmask, other=0.0)[:, None]
@@ -146,9 +147,8 @@ def rmsnorm_rope_permute_fwd(
 def rmsnorm_rope_permute_bwd(
     dy: torch.Tensor, x: torch.Tensor, w: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, rstd: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """``dy (B, H, S, D)`` any strides but the last -> ``(dx (B, S, H, D) contiguous, dw (H, D) in w.dtype)``."""
+    """``dy (B, H, S, D)`` any strides, including expanded scalar gradients -> ``(dx (B, S, H, D) contiguous, dw (H, D) in w.dtype)``."""
     B, S, H, D = x.shape
-    assert dy.stride(3) == 1, "dy must be contiguous along D; other strides are passed through"
     block_h, block_dh, warps = _geometry(H, D)
     T = B * S
     n_programs = max(1, min(T, 2 * _num_sms(x.device)))
@@ -157,7 +157,7 @@ def rmsnorm_rope_permute_bwd(
     _fused_bwd_kernel[(n_programs,)](
         dy, x, w, cos, sin, rstd, dx, dw_partial, T, S, H, D,
         x.stride(0), x.stride(1), x.stride(2),
-        dy.stride(0), dy.stride(1), dy.stride(2),
+        dy.stride(0), dy.stride(1), dy.stride(2), dy.stride(3),
         BLOCK_H=block_h, BLOCK_DH=block_dh, COMPUTE=tl.float32, num_warps=warps,
     )
     return dx, dw_partial.sum(0).to(w.dtype)
@@ -187,7 +187,7 @@ def rmsnorm_rope_permute(x: torch.Tensor, w: torch.Tensor, cos: torch.Tensor, si
 def qk_prep(
     q: torch.Tensor, k: torch.Tensor, q_norm_w: torch.Tensor, k_norm_w: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, eps: float
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Drop-in for ``minilm/model.py::qk_prep``: one launch for q (``Hq`` heads) and one for k (``Hk``)."""
+    """Drop-in for ``minilm/attention.py::qk_prep``: one launch for q (``Hq`` heads) and one for k (``Hk``)."""
     return rmsnorm_rope_permute(q, q_norm_w, cos, sin, eps), rmsnorm_rope_permute(k, k_norm_w, cos, sin, eps)
 
 

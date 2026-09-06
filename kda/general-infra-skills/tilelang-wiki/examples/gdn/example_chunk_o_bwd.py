@@ -9,7 +9,6 @@ from tilelang.engine.callback import register_cuda_postproc_callback  # noqa: F4
 
 # Add your fla repository path to sys.path
 # Currently we use the fla repository from the flash-linear-attention project at commit id f03cb3ae
-# sys.path.insert(0, "/home/tzj/flash-linear-attention")
 try:
     import fla
 

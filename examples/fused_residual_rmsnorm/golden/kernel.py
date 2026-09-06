@@ -106,9 +106,41 @@ def _fwd_normalize_kernel(
 
 
 @triton.jit
+def _small_bwd_kernel(
+    DY, DH, H, W, RS, DX, DR, DW, N: tl.constexpr, D: tl.constexpr,
+    SY, SYD, SY2, SY3, SH, SHD, SH2, SH3, N1, N2,
+    BD: tl.constexpr, BN: tl.constexpr, BC: tl.constexpr,
+):
+    """Each block owns one activation row and a disjoint weight-gradient slice."""
+    row = tl.program_id(0).to(tl.int64)
+    d = tl.arange(0, BD)
+    h = tl.load(H + row * D + d, d < D, other=0)
+    yo = row % N1 * SY + (row // N1) % N2 * SY2 + row // (N1*N2) * SY3
+    ho = row % N1 * SH + (row // N1) % N2 * SH2 + row // (N1*N2) * SH3
+    dy = tl.load(DY + yo + d * SYD, d < D, other=0).to(tl.float32)
+    dh = tl.load(DH + ho + d * SHD, d < D, other=0).to(tl.float32)
+    w = tl.load(W + d, d < D, other=0).to(tl.float32)
+    rs = tl.load(RS + row)
+    xhat = h * rs
+    g = dh + rs * (dy * w - xhat * tl.sum(dy * w * xhat, 0) / D)
+    tl.store(DX + row * D + d, g, d < D)
+    tl.store(DR + row * D + d, g, d < D)
+    # Columns have a single owner, so the small reduction needs neither a partial
+    # allocation nor a second launch. The extra reads are confined to tiny inputs.
+    cols = row * BC + tl.arange(0, BC)
+    rows = tl.arange(0, BN).to(tl.int64)
+    mask = (rows[:, None] < N) & (cols[None, :] < D)
+    hh = tl.load(H + rows[:, None] * D + cols[None, :], mask, other=0)
+    offsets = rows % N1 * SY + (rows // N1) % N2 * SY2 + rows // (N1*N2) * SY3
+    yy = tl.load(DY + offsets[:, None] + cols[None, :] * SYD, mask, other=0).to(tl.float32)
+    rr = tl.load(RS + rows, rows < N, other=0)
+    tl.store(DW + cols, tl.sum(yy * hh * rr[:, None], 0), cols < D)
+
+
+@triton.jit
 def _bwd_kernel(
     dy_ptr, dh_ptr, h_ptr, w_ptr, rstd_ptr, dx_ptr, dr_ptr, dw_partial_ptr,
-    N, D, stride_dy, stride_dh,
+    N, D, stride_dy, stride_dyd, sy2, sy3, stride_dh, stride_dhd, sh2, sh3, N1, N2,
     BLOCK_D: tl.constexpr, R: tl.constexpr, COMPUTE: tl.constexpr,
 ):
     # Fixed grid striding over rows, R rows per tile; one fp32 dw partial per program. dy and
@@ -123,8 +155,10 @@ def _bwd_kernel(
         rows = (row0 + tl.arange(0, R) * n_programs).to(tl.int64)[:, None]
         mask = (rows < N) & cmask
         h = tl.load(h_ptr + rows * D + cols, mask=mask, other=0.0)
-        dy = tl.load(dy_ptr + rows * stride_dy + cols, mask=mask, other=0.0).to(COMPUTE)
-        dh = tl.load(dh_ptr + rows * stride_dh + cols, mask=mask, other=0.0).to(COMPUTE)
+        yo = rows % N1 * stride_dy + (rows // N1) % N2 * sy2 + rows // (N1*N2) * sy3
+        ho = rows % N1 * stride_dh + (rows // N1) % N2 * sh2 + rows // (N1*N2) * sh3
+        dy = tl.load(dy_ptr + yo + cols * stride_dyd, mask=mask, other=0.0).to(COMPUTE)
+        dh = tl.load(dh_ptr + ho + cols * stride_dhd, mask=mask, other=0.0).to(COMPUTE)
         rstd = tl.load(rstd_ptr + rows, mask=rows < N, other=0.0)
         xhat = h * rstd
         dxhat = dy * w
@@ -205,7 +239,23 @@ def add_rmsnorm_fwd(
 def add_rmsnorm_bwd(dy: torch.Tensor, dh: torch.Tensor, h: torch.Tensor, w: torch.Tensor, rstd: torch.Tensor, x_dtype: torch.dtype):
     """Returns ``(dx, dresidual, dw)``. ``dy`` and ``dh`` keep their row strides (no copy)."""
     N, D = h.shape
-    assert dy.stride(1) == 1 and dh.stride(1) == 1, "add_rmsnorm backward: dy/dh need a unit last stride"
+    if dy.shape != dh.shape or dy.numel() != h.numel() or not 2 <= dy.ndim <= 4:
+        raise ValueError("backward gradients must match and have two to four dimensions")
+    def layout(t):
+        return (t.stride(-2), t.stride(-1), t.stride(-3) if t.ndim >= 3 else 0,
+                t.stride(-4) if t.ndim >= 4 else 0)
+    n1, n2 = dy.shape[-2], dy.shape[-3] if dy.ndim >= 3 else 1
+    if 0 < N <= 128 and D <= 8192:
+        dx = torch.empty_like(h, dtype=x_dtype)
+        dr = torch.empty_like(h)
+        dw = torch.empty_like(w)
+        _small_bwd_kernel[(N,)](
+            dy, dh, h, w, rstd, dx, dr, dw, N, D,
+            *layout(dy), *layout(dh), n1, n2,
+            BD=triton.next_power_of_2(D), BN=triton.next_power_of_2(N),
+            BC=triton.next_power_of_2(triton.cdiv(D, N)), num_warps=4 if D <= 2048 else 8,
+        )
+        return dx, dr, dw
     dx = torch.empty(N, D, dtype=x_dtype, device=h.device)
     dr = torch.empty(N, D, dtype=torch.float32, device=h.device)
     block, rows, warps = _bwd_geometry(D)
@@ -213,7 +263,7 @@ def add_rmsnorm_bwd(dy: torch.Tensor, dh: torch.Tensor, h: torch.Tensor, w: torc
     n_programs = max(1, min(triton.cdiv(N, rows), 2 * sms))
     dw_partial = torch.empty(n_programs, D, dtype=torch.float32, device=h.device)
     _bwd_kernel[(n_programs,)](
-        dy, dh, h, w, rstd, dx, dr, dw_partial, N, D, dy.stride(0), dh.stride(0),
+        dy, dh, h, w, rstd, dx, dr, dw_partial, N, D, *layout(dy), *layout(dh), n1, n2,
         BLOCK_D=block, R=rows, COMPUTE=tl.float32, num_warps=warps,
     )
     return dx, dr, dw_partial.sum(0).to(w.dtype)
@@ -241,16 +291,17 @@ class _AddRMSNorm(torch.autograd.Function):
         if save_rstd:
             ctx.save_for_backward(h, w, rstd)
         ctx.x_dtype = x.dtype
+        ctx.shape = shape
         return h.view(shape), y.view(shape)
 
     @staticmethod
     def backward(ctx, dh, dy):
         h, w, rstd = ctx.saved_tensors
         # Either output may be unused downstream; autograd then passes None.
-        dh2 = torch.zeros_like(h) if dh is None else _rows(dh)
-        dy2 = torch.zeros(h.shape, dtype=ctx.x_dtype, device=h.device) if dy is None else _rows(dy)
+        dh2 = torch.zeros_like(h).view(ctx.shape) if dh is None else dh
+        dy2 = torch.zeros(ctx.shape, dtype=ctx.x_dtype, device=h.device) if dy is None else dy
         dx, dr, dw = add_rmsnorm_bwd(dy2, dh2, h, w, rstd, ctx.x_dtype)
-        shape = (dh if dh is not None else dy).shape
+        shape = ctx.shape
         return dx.view(shape), dr.view(shape), dw, None, None
 
 

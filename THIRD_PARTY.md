@@ -1,7 +1,8 @@
 # Third-party acknowledgements
 
 KDA-owned material is covered by the root [MIT license](LICENSE). Bundled third-party
-material retains its upstream licenses and notices.
+material retains its upstream licenses and notices. Machine-specific paths and addresses
+in selected excerpts have been generalized.
 
 | Included collection | Upstream | License notice |
 | --- | --- | --- |

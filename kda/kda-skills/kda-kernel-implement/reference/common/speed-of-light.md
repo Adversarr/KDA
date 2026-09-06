@@ -165,6 +165,51 @@ generated (kda-kernel-implement SKILL.md §3, "When the `compile` baseline ... c
 before inventing a hypothesis; the Triton GEMM SNIPPET's measured table shows what the fusion
 buys and costs shape by shape.
 
+## Attention: Flash-calibrated useful-work roof
+
+For `flash_attention_2`, set `_speed_of_light.ROOF_METHOD = "attention"` and retain
+`ROOF = "bf16"` or `"fp16"` for the separately reported datasheet bound. Implement
+`attention_work(phase, **inputs)` returning `q_shape`, `k_shape`, `v_shape` in `(B,H,S,D)`
+order and `pairs`, the allowed query/key pairs across batches and query heads. Derive
+pairs from the contract: causal triangles, full block-causal chunks plus the tail,
+sparse mask cells, or valid keys. Do not count masked pairs just because a kernel visits
+them. Keep native GQA dimensions; do not expand KV heads for calibration.
+
+The runtime forces PyTorch's FlashAttention backend on independent seeded dense inputs
+of that geometry and storage dtype. Three interleaved profiler rounds measure training
+forward, backward and inference separately; each phase uses the minimum round median.
+Backward retains a graph and measures only `autograd.grad`. Recompute adds the calibrated
+forward and backward times. The formula is:
+
+```text
+density = allowed_pairs / (B * Hq * Sq * Sk)
+compute_ms = density * dense_flash_ms[phase]
+roof_ms = max(same_byte_count_copy_ms, compute_ms)
+sol_eff = roof_ms / kernel_ms
+```
+
+This measures dense Flash throughput and extrapolates it to useful work. It is an
+achievable-throughput proxy, not an exact sparse latency prediction or a physical lower
+bound. Density scaling also scales launch overhead; the copy floor and existing latency
+rule remain applicable. Irregular masks, softmax reductions, operand layouts and stricter
+intermediate precision can create costs absent from calibration. Document those costs;
+do not multiply the roof by an implementation-dependent correction to obtain a pass.
+An unavailable forced Flash backend produces incomplete evidence, with no cube, math-SDPA
+or datasheet fallback. `roof_details` records geometry, density, backend and raw samples.
+
+Use `4*P*D` useful forward FLOPs and `10*P*D` backward FLOPs (including one probability
+reconstruction); recompute adds `4*P*D`. Split dQ and dK/dV implementations can issue
+`14*P*D`, and precision emulation can issue still more. Record issued work separately;
+duplicated work does not raise the useful-work numerator. Count auxiliary and reduction
+traffic independently under the byte rules above.
+
+Calibration does not verify the candidate's mask or rounding contract and is not an
+eligible correctness baseline. Verify and time eager, compiled and applicable attention
+baselines on the actual contract. The runtime thresholds remain 0.70 SoL, 0.95 baseline,
+the below-10-us SoL waiver and the existing 1-us absolute baseline parity allowance.
+Conflicting near-gate repeats remain incomplete. Square-GEMM attention numbers from older
+reports are historical diagnostics; remeasure under this method before accepting them.
+
 ## Small grids and the latency floor
 
 Below a few MB the roof is not bandwidth but latency: a device copy of 0.5 MB takes ~3.5 us

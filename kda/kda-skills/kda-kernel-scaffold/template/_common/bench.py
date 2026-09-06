@@ -8,6 +8,7 @@ only device kernel time, so host launch overhead is excluded; the events method 
 from __future__ import annotations
 
 import statistics
+import math
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
@@ -50,17 +51,92 @@ def _bench_events(fn: Callable[[], Any], warmup: int, iters: int, device: torch.
 _MARK = "kda_bench_"
 
 
-def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device) -> List[float]:
+class _IncompleteProfilerTrace(RuntimeError):
+    """Missing/invalid collection evidence, distinct from an exception in the kernel."""
+    def __init__(self, details):
+        self.details = details
+        super().__init__(details["reason"])
+
+
+_MEASUREMENT_DIAGNOSTICS: List[dict] = []
+
+
+def measurement_diagnostics() -> List[dict]:
+    """Copy failed profiler-attempt evidence, including the bounded retry outcome."""
+    import copy
+    return copy.deepcopy(_MEASUREMENT_DIAGNOSTICS)
+
+
+def _raw_profiler_samples(events, iters: int):
+    """Use original CPU-span matching without building PyTorch CPU event trees.
+
+    Kineto timestamps are nanoseconds on one trace clock. Synthetic GPU user
+    annotations and hidden events are excluded, just as in parsed-event timing.
+    """
     from torch.autograd import DeviceType
+
+    if iters <= 0:
+        raise ValueError("profiler iterations must be positive")
+    spans, kernels = {}, []
+    cpu_count = cuda_count = 0
+    invalid = []
+    for event in events:
+        device_type, name = event.device_type(), event.name()
+        if device_type == DeviceType.CPU:
+            cpu_count += 1
+        elif device_type == DeviceType.CUDA:
+            cuda_count += 1
+        if getattr(event, "is_hidden_event", lambda: False)():
+            continue
+        marker = device_type == DeviceType.CPU and name.startswith(_MARK)
+        kernel = device_type == DeviceType.CUDA and not name.startswith(_MARK)
+        if not (marker or kernel):
+            continue
+        start, end = event.start_ns(), event.end_ns()
+        try:
+            valid_timestamps = math.isfinite(start) and math.isfinite(end) and end >= start
+        except (TypeError, ValueError, OverflowError):
+            valid_timestamps = False
+        if not valid_timestamps:
+            invalid.append("nonfinite or reversed event timestamps")
+            continue
+        if marker:
+            if name in spans:
+                invalid.append("duplicate iteration annotation")
+            spans[name] = (start, end)
+        else:
+            kernels.append((start, end))
+    times, counts = [], []
+    for i in range(iters):
+        span = spans.get(f"{_MARK}{i}")
+        if span is None:
+            invalid.append("missing iteration annotation")
+            times.append(0.0)
+            counts.append(0)
+            continue
+        start, end = span
+        durations = [ke - ks for ks, ke in kernels if start <= ks <= end]
+        times.append(sum(durations) / 1e6)
+        counts.append(len(durations))
+    if len(spans) != iters:
+        invalid.append("unexpected annotation count")
+    if any(not math.isfinite(t) or t <= 0 for t in times):
+        invalid.append("missing positive finite device timing for an iteration")
+    details = {"cpu_events": cpu_count, "cuda_events": cuda_count,
+               "annotations": len(spans), "matched_kernels": counts,
+               "samples_ms": [t if math.isfinite(t) else None for t in times]}
+    if invalid:
+        details["reason"] = "; ".join(dict.fromkeys(invalid))
+        raise _IncompleteProfilerTrace(details)
+    return times
+
+
+def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device) -> List[float]:
     from torch.profiler import ProfilerActivity, profile, record_function
 
     for _ in range(warmup):
         fn()
     torch.cuda.synchronize(device)
-    # Synchronising after the flush and again inside the annotation makes the annotation's CPU
-    # time range bracket exactly the kernels ``fn`` launched, on the profiler's unified clock.
-    # Attribution by time range works for Triton launches and autograd-thread kernels alike,
-    # where ``device_time_total`` of the annotation would only count aten kernels on this thread.
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
         for i in range(iters):
             _flush_l2(device)
@@ -68,17 +144,28 @@ def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torc
             with record_function(f"{_MARK}{i}"):
                 fn()
                 torch.cuda.synchronize(device)
-    events = prof.events()
-    spans = {e.name: (e.time_range.start, e.time_range.end) for e in events if e.device_type == DeviceType.CPU and e.name.startswith(_MARK)}
-    kernels = [e for e in events if e.device_type == DeviceType.CUDA and not e.name.startswith(_MARK)]
-    times = []
-    for i in range(iters):
-        span = spans.get(f"{_MARK}{i}")
-        if span is None:
-            return []
-        start, end = span
-        times.append(sum(k.time_range.elapsed_us() for k in kernels if start <= k.time_range.start <= end) / 1e3)
-    return times
+    # prof.events() constructs millions of CPU FunctionEvents for chunked eager
+    # baselines. Only raw GPU durations and the ten CPU annotations are needed.
+    result = getattr(getattr(prof, "profiler", None), "kineto_results", None)
+    try:
+        if result is None:
+            raise _IncompleteProfilerTrace({"reason": "Kineto trace unavailable"})
+        return _raw_profiler_samples(result.events() or [], iters)
+    except _IncompleteProfilerTrace as exc:
+        # Explicit opt-in only: normal reports contain counts/reasons, not paths.
+        import os
+        directory = os.environ.get("KDA_PROFILER_DIAGNOSTICS_DIR")
+        if directory:
+            from pathlib import Path
+            from uuid import uuid4
+            try:
+                target = Path(directory) / f"failed-profiler-{uuid4().hex}.trace.json"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                prof.export_chrome_trace(str(target))
+                exc.details["chrome_trace"] = str(target)
+            except Exception as export_error:
+                exc.details["trace_export_error"] = type(export_error).__name__
+        raise
 
 
 def bench_ms(
@@ -93,15 +180,41 @@ def bench_ms(
     device = _current_device(device)
     times: List[float] = []
     if method in ("auto", "profiler"):
-        try:
-            times = _bench_profiler(fn, warmup, iters, device)
-        except Exception:
-            if method == "profiler":
+        retry_record = None
+        for attempt in range(2):
+            try:
+                times = _bench_profiler(fn, warmup, iters, device)
+                if len(times) != iters or any(not math.isfinite(t) or t <= 0 for t in times):
+                    raise _IncompleteProfilerTrace({"reason": "incomplete profiler samples",
+                        "samples_ms": [t if math.isfinite(t) else None for t in times]})
+            except _IncompleteProfilerTrace as exc:
+                record = dict(exc.details, method="profiler", attempt=attempt + 1,
+                              callable=getattr(fn, "__qualname__", type(fn).__name__),
+                              warmup=warmup, iters=iters,
+                              outcome="retry_pending" if attempt == 0 else "retry_exhausted")
+                _MEASUREMENT_DIAGNOSTICS.append(record)
+                if attempt == 0:
+                    retry_record = record
+                    continue
+                if retry_record is not None:
+                    retry_record["outcome"] = "retry_failed"
+                if method == "auto":
+                    record["fallback"] = "events"
+                    break
                 raise
-        if times and max(times) > 0:
-            return statistics.median(times)
-        if method == "profiler":
-            raise RuntimeError("profiler recorded no device kernels for fn; use method='events'")
+            except Exception:
+                if retry_record is not None:
+                    retry_record["outcome"] = "retry_runtime_error"
+                if method == "profiler":
+                    raise
+                if retry_record is not None:
+                    retry_record["fallback"] = "events"
+                break
+            else:
+                if retry_record is not None:
+                    retry_record["outcome"] = "retry_succeeded"
+                return statistics.median(times)
+
     return statistics.median(_bench_events(fn, warmup, iters, device))
 
 
@@ -172,6 +285,122 @@ def matmul_ms(
     return total
 
 
+
+def _attention_samples(q_shape, k_shape, v_shape, dtype, method, device):
+    """Measure independent dense Flash phases; no candidate or masked baseline is used."""
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    from torch.nn.functional import scaled_dot_product_attention
+
+    generator = torch.Generator(device=device).manual_seed(1729)
+    q, k, v = [torch.randn(shape, dtype=dtype, device=device, generator=generator,
+                           requires_grad=True) for shape in (q_shape, k_shape, v_shape)]
+    options = {"dropout_p": 0.0, "is_causal": False}
+    if q_shape[1] != k_shape[1]:
+        options["enable_gqa"] = True
+    # The context is held across warmup and every timed closure; unsupported Flash
+    # raises instead of silently selecting a math or memory-efficient backend.
+    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+        def forward():
+            return scaled_dot_product_attention(q, k, v, **options)
+
+        def inference():
+            with torch.no_grad():
+                return forward()
+
+        with torch.enable_grad():
+            output = forward()
+            upstream = torch.randn(output.shape, dtype=dtype, device=device, generator=generator)
+
+            def backward():
+                return torch.autograd.grad(output, (q, k, v), upstream, retain_graph=True)
+
+            closures = {"infer": inference, "fwd": forward, "bwd": backward}
+            samples = {phase: [] for phase in closures}
+            for _ in range(3):
+                for phase, fn in closures.items():
+                    samples[phase].append(bench_ms(fn, warmup=3, iters=10,
+                                                   method=method, device=device))
+    return samples
+
+
+_ATTENTION_CACHE: Dict[tuple, dict] = {}
+
+
+def attention_ms(
+    phase: str, *, q_shape, k_shape, v_shape, pairs: float,
+    dtype: torch.dtype = torch.bfloat16, method: str = "profiler",
+    device: Optional[torch.device] = None,
+) -> dict:
+    """Dense Flash-calibrated useful-work time, with explicit availability/provenance.
+
+    Density is allowed query/key pairs divided by the dense plane across all query
+    heads and batches. Scaling is a throughput proxy, not an exact sparse latency
+    model or a claim of equivalent intermediate rounding. Callers combine it with
+    the compulsory-byte copy floor. Unsupported calibration never falls back.
+    """
+    import math
+    import operator
+
+    if phase not in ("infer", "fwd", "bwd", "bwd_recompute"):
+        raise ValueError("unknown attention phase")
+    if method not in ("auto", "profiler", "events"):
+        raise ValueError("unknown benchmark method")
+    shapes = []
+    for shape in (q_shape, k_shape, v_shape):
+        if len(shape) != 4 or any(isinstance(d, bool) for d in shape):
+            raise ValueError("attention shapes must be four positive integers (B,H,S,D)")
+        try:
+            shape = tuple(operator.index(d) for d in shape)
+        except TypeError as exc:
+            raise ValueError("attention dimensions must be integers") from exc
+        if any(d <= 0 for d in shape):
+            raise ValueError("attention dimensions must be positive")
+        shapes.append(shape)
+    q_shape, k_shape, v_shape = shapes
+    b, hq, sq, d = q_shape
+    if (k_shape[0] != b or v_shape[0] != b or k_shape[1:3] != v_shape[1:3]
+            or k_shape[3] != d or hq % k_shape[1]):
+        raise ValueError("incompatible attention batch, heads, sequence or Q/K dimensions")
+    dense_pairs = b * hq * sq * k_shape[2]
+    if isinstance(pairs, bool) or not math.isfinite(float(pairs)) or not 0 <= pairs <= dense_pairs:
+        raise ValueError("pairs must be finite and between zero and the dense pair count")
+    density = float(pairs) / dense_pairs
+    result = {"method": "attention", "available": False, "roof_ms": None,
+              "phase": phase, "density": density, "pairs": float(pairs),
+              "dense_pairs": dense_pairs, "q_shape": list(q_shape),
+              "k_shape": list(k_shape), "v_shape": list(v_shape),
+              "dtype": str(dtype), "backend": "FLASH_ATTENTION", "samples": {},
+              "precision": "storage-dtype calibration; intermediate rounding may differ"}
+    if dtype not in (torch.bfloat16, torch.float16):
+        result["reason"] = "Flash calibration requires bf16 or fp16 storage"
+        return result
+    try:
+        device = _current_device(device)
+        result["device"] = str(device)
+        if device.type != "cuda":
+            raise RuntimeError("Flash calibration requires a CUDA device")
+        resolved_method = resolve_method(method, device)
+        result["bench_method"] = resolved_method
+        key = (q_shape, k_shape, v_shape, dtype, str(device), resolved_method)
+        samples = _ATTENTION_CACHE.get(key)
+        if samples is None:
+            samples = _attention_samples(q_shape, k_shape, v_shape, dtype, resolved_method, device)
+            if any(len(samples[p]) != 3 or any(not math.isfinite(t) or t <= 0 for t in samples[p])
+                   for p in ("infer", "fwd", "bwd")):
+                raise RuntimeError("Flash calibration returned invalid timing samples")
+            if len(_ATTENTION_CACHE) >= 16:
+                _ATTENTION_CACHE.pop(next(iter(_ATTENTION_CACHE)))
+            _ATTENTION_CACHE[key] = samples
+        result["samples"] = {p: list(values) for p, values in samples.items()}
+        # Recompute owns a fresh forward plus backward, each using the existing
+        # minimum-of-three round-median convention.
+        dense_ms = (min(samples["fwd"]) + min(samples["bwd"]) if phase == "bwd_recompute"
+                    else min(samples[phase]))
+        result.update(available=True, dense_ms=dense_ms, roof_ms=density * dense_ms)
+    except Exception as exc:
+        result["reason"] = f"{type(exc).__name__}: {exc}"
+    return result
+
 def configure_compile_for_dev() -> None:
     """Put ``torch.compile`` in a state where a dev run measures the code as it is on disk now.
 
@@ -222,4 +451,4 @@ def compile_or_none(
         return None
 
 
-__all__ = ["bench_ms", "copy_ms", "matmul_ms", "compile_or_none", "configure_compile_for_dev", "resolve_method"]
+__all__ = ["measurement_diagnostics", "attention_ms", "bench_ms", "copy_ms", "matmul_ms", "compile_or_none", "configure_compile_for_dev", "resolve_method"]

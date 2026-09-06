@@ -1,14 +1,38 @@
-# minidit
+# Adaptive LayerNorm training repository
 
-A small DiT (diffusion transformer) with adaLN-Zero blocks trained on random latents; exists
-to have a realistic training loop around `adaln` in `minidit/model.py`: LayerNorm without
-affine parameters followed by the per-sample `scale` and `shift` the conditioning MLP produces,
-computed in fp32 and cast back to the activation dtype. Every block calls it twice (attention
-and MLP branches); the final layer calls it once more followed by a SiLU.
+Conditioned latent noise prediction; modulation stays fp32 outside autocast.
+
+This is an ordinary eager PyTorch training repository. It runs independently with Python and
+PyTorch on a CUDA GPU, without downloaded data or pretrained weights. Synthetic data is
+generated from a fixed seed. No kernel package is required.
+
+## Run
+
+From this directory, run a bounded training check:
 
 ```bash
-python train_smoke.py --steps 50      # prints per-step loss/time, then median_step_ms and final_loss
+python -m experiments.train_noise --smoke --steps 3 --seed 0
 ```
 
-Configuration is `minidit/config.py` (`ModelConfig`, `TrainConfig`): bf16 autocast, batch 16,
-4096 tokens, `d_model` 1152, 16 heads, 2 layers; the conditioning path stays fp32.
+For the representative workload described in the task:
+
+```bash
+python -m experiments.train_noise --steps 50 --seed 0
+```
+
+`--smoke` reduces batch size, token count and/or depth while retaining the target's channel
+widths and head dimensions. It is a correctness smoke, not the representative benchmark. The
+final two lines are `median_step_ms` and `final_loss`. Timing includes backward and the
+optimizer update, uses CUDA synchronization, and discards the first ten steps when available.
+`--steps` must be positive. The training loop rejects non-finite losses.
+
+## Code
+
+The selected operation is defined in `diffusion/layers.py`. Configuration lives in
+`diffusion/settings.py`. The surrounding model calls the operation in its real forward path; the
+loss, backward and optimizer exercise its trainable parameters.
+
+- `diffusion/denoiser.py`
+- `diffusion/layers.py`
+- `diffusion/settings.py`
+- `experiments/train_noise.py`

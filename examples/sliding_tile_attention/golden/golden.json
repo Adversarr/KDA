@@ -1,22 +1,1427 @@
 {
-  "gpu": "NVIDIA A800-SXM4-80GB",
+  "status": "incomplete",
   "workload": "user_train",
-  "shape": "B1 H8 S10496 (27 tiles x 384 + 128 text) D128 bf16, windows (3,3,3)..(1,1,1), 31.3% of the plane attended",
+  "gpu": "NVIDIA A800-SXM4-80GB",
+  "timestamp": "2026-09-06T16:11:08.169107+00:00",
+  "measurement": "Profiler device time; minimum of three interleaved rounds; incomplete captures rejected after one diagnostic retry.",
+  "verification": {
+    "numerical_complete": true,
+    "adjoints_passed": true,
+    "audit_complete": false,
+    "final_audit": "All three numerical workloads and fresh independent adjoints pass, including the confirmed 24-head 115456-token real model. Primary SoL and all eligible baseline gates pass. Real-model first-round profiling was interrupted after over ten minutes without completed round progress, approximately 60 GB profiler resident memory and an idle GPU; stack shows raw Kineto event processing. Real-model timings/calibration remain incomplete, with no partial or estimated timings accepted. Extra tuning budget exhausted."
+  },
   "kernel_ms": {
-    "fwd": 0.848,
-    "bwd": 2.7
+    "fwd": 0.8804325,
+    "bwd": 2.884544,
+    "infer": 0.885902
   },
-  "tflops": {
-    "fwd": 167,
-    "bwd": 131
-  },
-  "note": "device time from torch.profiler, bench_many min of 3 rounds; golden = block-sparse FA2 in Triton driven by per-(head, Q block) lists of allowed K blocks built once from the tile mask (full blocks unmasked, partial blocks re-gather the tile mask), heavy-first program order, deterministic two-kernel backward. FLOPs count the attended pairs only (4*D fwd, 10*D bwd per pair). HunyuanVideo size (24 heads, 115456 tokens, 43% attended) forward 396 ms = 179 TFLOP/s. See GOLDEN.md.",
   "baseline_ms": {
-    "eager_fwd": 35.31,
-    "eager_bwd": 37.5,
-    "sdpa_mask_fwd": 15.55,
-    "sdpa_mask_bwd": 20.13,
-    "compile_fwd": 10.33,
-    "compile_bwd": 11.42
+    "eager_fwd": 35.304652000000004,
+    "compiled_fwd": 7.210048,
+    "sdpa_fwd": 15.5498385,
+    "eager_infer": 35.305677,
+    "compiled_infer": 6.472415,
+    "sdpa_infer": 15.5500595,
+    "eager_bwd": 37.5182585,
+    "compiled_bwd": 11.211778,
+    "sdpa_bwd": 20.040211
+  },
+  "roof_ms": {
+    "fwd": 0.7686517119274242,
+    "infer": 0.7685667926829268,
+    "bwd": 2.1284626339976205
+  },
+  "sol_ms": {
+    "fwd": 0.45319992451282054,
+    "infer": 0.45319992451282054,
+    "bwd": 1.1329998112820512
+  },
+  "derived": {
+    "fwd": {
+      "sol_eff": 0.873038775746493,
+      "speedup": 8.189211552276864
+    },
+    "bwd": {
+      "sol_eff": 0.7378853066542305,
+      "speedup": 3.8868458931463694
+    },
+    "infer": {
+      "sol_eff": 0.867552836186087,
+      "speedup": 7.3060169183498855
+    }
+  },
+  "derived_scope": "Raw product speedup compares eager/compiled. audited_phase_gates also includes eligible SDPA.",
+  "measurement_environment": {
+    "bench_method": "profiler",
+    "gpu": {
+      "name": "NVIDIA A800-SXM4-80GB",
+      "cc": "8.0",
+      "sms": 108,
+      "sm_clock_ghz": 1.41,
+      "l2_bytes": 41943040,
+      "total_mem_bytes": 85167243264,
+      "hbm_gbps": 2039.04,
+      "fp32_tflops": 19.5,
+      "bf16_tflops": 312.0,
+      "flops_source": "table"
+    },
+    "torch": "2.11.0+cu128"
+  },
+  "source_hashes": {
+    "golden/kernel.py": "c325fc8ecaf88bd0ce1607829351dca2fba6dab6436292dec4454db2119995c5",
+    "golden/reference.py": "1175fac668bfe1fdb3abd5871f9d6091d26a99cd9a5faca7b4b4ff95e7a7e106"
+  },
+  "validation_hashes": {
+    "examples/_benchmark.py": "25e8f743840f6d2af8545269b804b48796b5108ca31c46d34619ceb82c50940a",
+    "examples/sliding_tile_attention/benchmark.py": "8a1001ec125171e786195f53afc67ac927d81c9c6f12e9ba3d4285f97f171cb5",
+    "examples/sliding_tile_attention/benchmark_cases.py": "2a9a77941c44e8d2a92b6ba722d58d58e354f80fd3368b56188fae40bebb9f48",
+    "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+    "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "ee91e7fde0f90778c80dbf99c548b1042c895e5871fa9dcc616616f5a53c864d",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+    "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "3db98eb6290198abc929602911eaa5edbafbef46ba73f35d3723373192cb26d1",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+    "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "87b241b275c591694846560e9879f50c9da3150f854efdabd782c539772f3033",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "883c0ceaed2fa84bd361ed8fa98c5a807225f550d0dd5702f322aadce7c8b042",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "8f0234fff3feedadcba7db0c1078b29086e81eb6d20691fbeafabf7ba3c90163",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+    "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269"
+  },
+  "coverage": {
+    "all_workloads": [
+      "user_train",
+      "real_model",
+      "text_tail"
+    ],
+    "benchmark": true,
+    "required": {
+      "user_train": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": [
+          "kernel_fwd",
+          "kernel_infer",
+          "kernel_bwd"
+        ]
+      },
+      "real_model": {
+        "phases": [
+          "fwd",
+          "infer",
+          "bwd"
+        ],
+        "timings": [
+          "kernel_fwd",
+          "kernel_infer",
+          "kernel_bwd"
+        ]
+      }
+    }
+  },
+  "performance_verdict": "incomplete",
+  "reasons": [
+    "real_model: required workload missing"
+  ],
+  "workloads": [
+    {
+      "name": "user_train",
+      "required": true,
+      "dtype": "bf16",
+      "fwd": {
+        "0": {
+          "max_abs": 0.001953125,
+          "max_rel": 0.049591064453125,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 10747904,
+          "passed": true
+        }
+      },
+      "bwd": {
+        "0": {
+          "max_abs": 0.00390625,
+          "max_rel": 0.07246376811594203,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 10747904,
+          "passed": true
+        },
+        "1": {
+          "max_abs": 0.0078125,
+          "max_rel": 0.217437744140625,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 10747904,
+          "passed": true
+        },
+        "2": {
+          "max_abs": 0.00390625,
+          "max_rel": 0.0152587890625,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 10747904,
+          "passed": true
+        }
+      },
+      "infer": {
+        "0": {
+          "max_abs": 0.001953125,
+          "max_rel": 0.049591064453125,
+          "atol": 0.016,
+          "rtol": 0.016,
+          "reduced_over": 1,
+          "n_bad": 0,
+          "n": 10747904,
+          "passed": true
+        }
+      },
+      "bwd_recompute": null,
+      "time_ms": {
+        "kernel_fwd": 0.8804325,
+        "eager_fwd": 35.304652000000004,
+        "compiled_fwd": 7.210048,
+        "sdpa_fwd": 15.5498385,
+        "kernel_infer": 0.885902,
+        "eager_infer": 35.305677,
+        "compiled_infer": 6.472415,
+        "sdpa_infer": 15.5500595,
+        "kernel_bwd": 2.884544,
+        "eager_bwd": 37.5182585,
+        "compiled_bwd": 11.211778,
+        "sdpa_bwd": 20.040211
+      },
+      "sol_ms": {
+        "fwd": 0.45319992451282054,
+        "infer": 0.45319992451282054,
+        "bwd": 1.1329998112820512
+      },
+      "roof_ms": {
+        "fwd": 0.7686517119274242,
+        "infer": 0.7685667926829268,
+        "bwd": 2.1284626339976205
+      },
+      "roof_details": {
+        "fwd": {
+          "method": "attention",
+          "available": true,
+          "roof_ms": 0.7686517119274242,
+          "phase": "fwd",
+          "density": 0.3133551457465794,
+          "pairs": 276168704.0,
+          "dense_pairs": 881328128,
+          "q_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "k_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "v_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "backend": "FLASH_ATTENTION",
+          "samples": {
+            "infer": [
+              2.454175,
+              2.452702,
+              2.4527985
+            ],
+            "fwd": [
+              2.452973,
+              2.453182,
+              2.453439
+            ],
+            "bwd": [
+              6.793346,
+              6.793120500000001,
+              6.792493
+            ]
+          },
+          "precision": "storage-dtype calibration; intermediate rounding may differ",
+          "bench_method": "profiler",
+          "dense_ms": 2.452973
+        },
+        "infer": {
+          "method": "attention",
+          "available": true,
+          "roof_ms": 0.7685667926829268,
+          "phase": "infer",
+          "density": 0.3133551457465794,
+          "pairs": 276168704.0,
+          "dense_pairs": 881328128,
+          "q_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "k_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "v_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "backend": "FLASH_ATTENTION",
+          "samples": {
+            "infer": [
+              2.454175,
+              2.452702,
+              2.4527985
+            ],
+            "fwd": [
+              2.452973,
+              2.453182,
+              2.453439
+            ],
+            "bwd": [
+              6.793346,
+              6.793120500000001,
+              6.792493
+            ]
+          },
+          "precision": "storage-dtype calibration; intermediate rounding may differ",
+          "bench_method": "profiler",
+          "dense_ms": 2.452702
+        },
+        "bwd": {
+          "method": "attention",
+          "available": true,
+          "roof_ms": 2.1284626339976205,
+          "phase": "bwd",
+          "density": 0.3133551457465794,
+          "pairs": 276168704.0,
+          "dense_pairs": 881328128,
+          "q_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "k_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "v_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "backend": "FLASH_ATTENTION",
+          "samples": {
+            "infer": [
+              2.454175,
+              2.452702,
+              2.4527985
+            ],
+            "fwd": [
+              2.452973,
+              2.453182,
+              2.453439
+            ],
+            "bwd": [
+              6.793346,
+              6.793120500000001,
+              6.792493
+            ]
+          },
+          "precision": "storage-dtype calibration; intermediate rounding may differ",
+          "bench_method": "profiler",
+          "dense_ms": 6.792493
+        }
+      },
+      "error": null,
+      "skipped": null,
+      "warnings": [],
+      "compile": null,
+      "compile_error": null,
+      "contract": null,
+      "derived": {
+        "fwd": {
+          "sol_eff": 0.873038775746493,
+          "speedup": 8.189211552276864
+        },
+        "bwd": {
+          "sol_eff": 0.7378853066542305,
+          "speedup": 3.8868458931463694
+        },
+        "infer": {
+          "sol_eff": 0.867552836186087,
+          "speedup": 7.3060169183498855
+        }
+      }
+    }
+  ],
+  "samples": {
+    "user_train": {
+      "fwd": {
+        "kernel": [
+          0.881022,
+          0.8804325,
+          0.880815
+        ],
+        "eager": [
+          35.306792,
+          35.309732,
+          35.304652000000004
+        ],
+        "compiled": [
+          7.214667,
+          7.210048,
+          7.211392
+        ],
+        "sdpa": [
+          15.551037,
+          15.5498385,
+          15.5508415
+        ]
+      },
+      "infer": {
+        "kernel": [
+          0.885902,
+          0.8866084999999999,
+          0.887168
+        ],
+        "eager": [
+          35.305677,
+          35.3093705,
+          35.310142
+        ],
+        "compiled": [
+          6.472415,
+          6.4760335,
+          6.4731355
+        ],
+        "sdpa": [
+          15.5501235,
+          15.5507345,
+          15.5500595
+        ]
+      },
+      "bwd": {
+        "kernel": [
+          2.8847009999999997,
+          2.8879025,
+          2.884544
+        ],
+        "eager": [
+          37.51899,
+          37.524163,
+          37.5182585
+        ],
+        "compiled": [
+          11.211778,
+          11.2167825,
+          11.217789
+        ],
+        "sdpa": [
+          20.0610715,
+          20.084865,
+          20.040211
+        ]
+      }
+    },
+    "real_model": {},
+    "text_tail": {}
+  },
+  "roof_analysis": {
+    "user_train": {
+      "fwd": {
+        "bytes": 86394400,
+        "flops": 141398376448,
+        "copy_ms": 0.0581595,
+        "compute_ms": 0.7686517119274242,
+        "datasheet_ms": 0.45319992451282054,
+        "achievable_ms": 0.7686517119274242,
+        "calibration": {
+          "method": "attention",
+          "available": true,
+          "roof_ms": 0.7686517119274242,
+          "phase": "fwd",
+          "density": 0.3133551457465794,
+          "pairs": 276168704.0,
+          "dense_pairs": 881328128,
+          "q_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "k_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "v_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "backend": "FLASH_ATTENTION",
+          "samples": {
+            "infer": [
+              2.454175,
+              2.452702,
+              2.4527985
+            ],
+            "fwd": [
+              2.452973,
+              2.453182,
+              2.453439
+            ],
+            "bwd": [
+              6.793346,
+              6.793120500000001,
+              6.792493
+            ]
+          },
+          "precision": "storage-dtype calibration; intermediate rounding may differ",
+          "bench_method": "profiler",
+          "dense_ms": 2.452973
+        }
+      },
+      "infer": {
+        "bytes": 86058528,
+        "flops": 141398376448,
+        "copy_ms": 0.058176,
+        "compute_ms": 0.7685667926829268,
+        "datasheet_ms": 0.45319992451282054,
+        "achievable_ms": 0.7685667926829268,
+        "calibration": {
+          "method": "attention",
+          "available": true,
+          "roof_ms": 0.7685667926829268,
+          "phase": "infer",
+          "density": 0.3133551457465794,
+          "pairs": 276168704.0,
+          "dense_pairs": 881328128,
+          "q_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "k_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "v_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "backend": "FLASH_ATTENTION",
+          "samples": {
+            "infer": [
+              2.454175,
+              2.452702,
+              2.4527985
+            ],
+            "fwd": [
+              2.452973,
+              2.453182,
+              2.453439
+            ],
+            "bwd": [
+              6.793346,
+              6.793120500000001,
+              6.792493
+            ]
+          },
+          "precision": "storage-dtype calibration; intermediate rounding may differ",
+          "bench_method": "profiler",
+          "dense_ms": 2.452702
+        }
+      },
+      "bwd": {
+        "bytes": 281707408,
+        "flops": 353495941120,
+        "copy_ms": 0.16920000000000002,
+        "compute_ms": 2.1284626339976205,
+        "datasheet_ms": 1.1329998112820512,
+        "achievable_ms": 2.1284626339976205,
+        "calibration": {
+          "method": "attention",
+          "available": true,
+          "roof_ms": 2.1284626339976205,
+          "phase": "bwd",
+          "density": 0.3133551457465794,
+          "pairs": 276168704.0,
+          "dense_pairs": 881328128,
+          "q_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "k_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "v_shape": [
+            1,
+            8,
+            10496,
+            128
+          ],
+          "dtype": "torch.bfloat16",
+          "backend": "FLASH_ATTENTION",
+          "samples": {
+            "infer": [
+              2.454175,
+              2.452702,
+              2.4527985
+            ],
+            "fwd": [
+              2.452973,
+              2.453182,
+              2.453439
+            ],
+            "bwd": [
+              6.793346,
+              6.793120500000001,
+              6.792493
+            ]
+          },
+          "precision": "storage-dtype calibration; intermediate rounding may differ",
+          "bench_method": "profiler",
+          "dense_ms": 6.792493
+        }
+      }
+    },
+    "real_model": {},
+    "text_tail": {}
+  },
+  "baseline_checks": {
+    "user_train": {
+      "compiled": {
+        "fwd": {
+          "0": {
+            "max_abs": 0.0009765625,
+            "max_rel": 0.011444091796875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.0009765625,
+            "max_rel": 0.011444091796875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.00048828125,
+            "max_rel": 0.0078125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.001953125,
+            "max_rel": 0.0078125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.0009765625,
+            "max_rel": 0.01049041748046875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        }
+      },
+      "sdpa": {
+        "fwd": {
+          "0": {
+            "max_abs": 0.0078125,
+            "max_rel": 0.1697540283203125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.0078125,
+            "max_rel": 0.1697540283203125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.015625,
+            "max_rel": 0.1920759677886963,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.2899169921875,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.009765625,
+            "max_rel": 0.2803802490234375,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        }
+      }
+    },
+    "real_model": {},
+    "text_tail": {}
+  },
+  "audited_phase_gates": [
+    {
+      "workload": "user_train",
+      "phase": "fwd",
+      "required": true,
+      "kernel_ms": 0.8804325,
+      "best_baseline_ms": 7.210048,
+      "best_baseline": "compiled_fwd",
+      "speedup": 8.189211552276864,
+      "baseline_pass": true,
+      "sol_eff": 0.873038775746493,
+      "sol_gated": true,
+      "sol_pass": true
+    },
+    {
+      "workload": "user_train",
+      "phase": "bwd",
+      "required": true,
+      "kernel_ms": 2.884544,
+      "best_baseline_ms": 11.211778,
+      "best_baseline": "compiled_bwd",
+      "speedup": 3.8868458931463694,
+      "baseline_pass": true,
+      "sol_eff": 0.7378853066542305,
+      "sol_gated": true,
+      "sol_pass": true
+    },
+    {
+      "workload": "user_train",
+      "phase": "infer",
+      "required": true,
+      "kernel_ms": 0.885902,
+      "best_baseline_ms": 6.472415,
+      "best_baseline": "compiled_infer",
+      "speedup": 7.3060169183498855,
+      "baseline_pass": true,
+      "sol_eff": 0.867552836186087,
+      "sol_gated": true,
+      "sol_pass": true
+    }
+  ],
+  "adjoint_checks": [
+    {
+      "op": "sliding_tile_attention",
+      "workload": "text_tail",
+      "kind": "multioutput_adjoint_side_check",
+      "passed": true,
+      "checks": {
+        "output_0_one_random": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0078125,
+              "max_rel": 0.1983642578125,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.26702880859375,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.001953125,
+              "max_rel": 0.037037037037037035,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            }
+          }
+        },
+        "output_0_one_sum": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0078125,
+              "max_rel": 0.1964569091796875,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.03125,
+              "max_rel": 0.3814697265625,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            }
+          }
+        },
+        "all_sum": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0078125,
+              "max_rel": 0.1964569091796875,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.03125,
+              "max_rel": 0.3814697265625,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            }
+          }
+        },
+        "all_broadcast": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.00390625,
+              "max_rel": 0.11363636363636363,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.19073486328125,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.0,
+              "max_rel": 0.0,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            }
+          }
+        },
+        "all_batch_broadcast": {
+          "passed": true,
+          "gradients": {
+            "0": {
+              "max_abs": 0.0078125,
+              "max_rel": 0.1983642578125,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "1": {
+              "max_abs": 0.015625,
+              "max_rel": 0.26702880859375,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            },
+            "2": {
+              "max_abs": 0.001953125,
+              "max_rel": 0.037037037037037035,
+              "atol": 0.016,
+              "rtol": 0.016,
+              "reduced_over": 1,
+              "n_bad": 0,
+              "n": 449536,
+              "passed": true
+            }
+          }
+        }
+      },
+      "output_shapes": [
+        [
+          1,
+          8,
+          439,
+          128
+        ]
+      ],
+      "grad_reductions": [
+        1,
+        1,
+        1
+      ],
+      "dtype": "bf16",
+      "torch": "2.11.0+cu128",
+      "source_hashes": {
+        "golden/kernel.py": "c325fc8ecaf88bd0ce1607829351dca2fba6dab6436292dec4454db2119995c5",
+        "golden/reference.py": "1175fac668bfe1fdb3abd5871f9d6091d26a99cd9a5faca7b4b4ff95e7a7e106"
+      },
+      "validation_hashes": {
+        "examples/_check_adjoint.py": "3d6793dee0d45baee9a89f0799dfd3178ab1c2da1095149619ba1805a8fc7332",
+        "examples/sliding_tile_attention/benchmark.py": "8a1001ec125171e786195f53afc67ac927d81c9c6f12e9ba3d4285f97f171cb5",
+        "examples/sliding_tile_attention/benchmark_cases.py": "2a9a77941c44e8d2a92b6ba722d58d58e354f80fd3368b56188fae40bebb9f48",
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+        "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "ee91e7fde0f90778c80dbf99c548b1042c895e5871fa9dcc616616f5a53c864d",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+        "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "3db98eb6290198abc929602911eaa5edbafbef46ba73f35d3723373192cb26d1",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+        "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "87b241b275c591694846560e9879f50c9da3150f854efdabd782c539772f3033",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "883c0ceaed2fa84bd361ed8fa98c5a807225f550d0dd5702f322aadce7c8b042",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "8f0234fff3feedadcba7db0c1078b29086e81eb6d20691fbeafabf7ba3c90163",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+        "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269"
+      }
+    }
+  ],
+  "numerical_verification": {
+    "source_hashes": {
+      "golden/kernel.py": "c325fc8ecaf88bd0ce1607829351dca2fba6dab6436292dec4454db2119995c5",
+      "golden/reference.py": "1175fac668bfe1fdb3abd5871f9d6091d26a99cd9a5faca7b4b4ff95e7a7e106"
+    },
+    "validation_hashes": {
+      "examples/_benchmark.py": "25e8f743840f6d2af8545269b804b48796b5108ca31c46d34619ceb82c50940a",
+      "examples/sliding_tile_attention/benchmark.py": "8a1001ec125171e786195f53afc67ac927d81c9c6f12e9ba3d4285f97f171cb5",
+      "examples/sliding_tile_attention/benchmark_cases.py": "2a9a77941c44e8d2a92b6ba722d58d58e354f80fd3368b56188fae40bebb9f48",
+      "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/kernel.py": "a323748f4fbb7b6b9b766ccab06c7e3444806a02b4c6b3d01fc558da6b3ff3ab",
+      "kda/kda-skills/kda-kernel-implement/reference/nvmath/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+      "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/kernel.py": "ee91e7fde0f90778c80dbf99c548b1042c895e5871fa9dcc616616f5a53c864d",
+      "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+      "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/kernel.py": "31c77f99df83c9d3b020ac8d9e2bb5855cda535b3589906e1cdfa569b48d1d48",
+      "kda/kda-skills/kda-kernel-implement/reference/tilelang/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+      "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/kernel.py": "156a447029999b97832d1dca62a9796399884740995a8451cae4877fcdd6c861",
+      "kda/kda-skills/kda-kernel-implement/reference/tilelang/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/kernel.py": "3db98eb6290198abc929602911eaa5edbafbef46ba73f35d3723373192cb26d1",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_causal/reference.py": "109bcb979466f6e425671334a448e686d9889a9bb23eba5afae78accf2b9056f",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/kernel.py": "a089d274334fffb788fd0b51f71ee8190e71e2c8804d82fb225516dcebf860b1",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/attention/fa2_gqa/reference.py": "19fa916e2902abdac26f881b510b2df1a62f0e1bd8468899c0011dfedf15ad49",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/kernel.py": "3204748885bfc20e1d49e4529bab81473ed70eb55b73a625dfc92c2165799ae7",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/elementwise/residual_add/reference.py": "c9e9287e819322f5555cc3aa9c0d9d61a353f1a3b51fb1bde154653a8d36b517",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/kernel.py": "073920d03ace0b6a23e2126164918336b2974eaf566d012add9fa7d113e7e6ad",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/epilogue/gemm/reference.py": "f76a94e0590b31c43256cc5dd6aa91e279ea6398abc50112b29b0edcffc08dbb",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/kernel.py": "a533cbcb05ad7e93f1a440c1153118e7d32aa928fd2bf449c6d4ce05c89aded7",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/fp32_norms/rmsnorm/reference.py": "20844b199014257b1e25f1d8484c6f4c155bd81287a41891489dccd3f6823ebd",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/kernel.py": "9dd46838e99b885438aac4b0ec3669bbca007efc14823f1dffb4dbb664c8179c",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/fusion-exemplar/rmsnorm_rope_permute/reference.py": "9aa59e9e47fcec7d5870e4a4243143d2cb1ecc4a08c9fc0ed39f8f316b3e398a",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/kernel.py": "a544d1336c7946d42d5148c5c8772b793795258620d2ec0ba0ba07f97c94478c",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/permute/bnhd_to_bhnd/reference.py": "b4ba02259c84c823aede49a8ba3fdfef47cef7f7f6d56ef56d1ee55cc19a3c89",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/kernel.py": "2e5c48081b87c0cc25322f6b121b36f237b015a479deecbac033827e57ecce4c",
+      "kda/kda-skills/kda-kernel-implement/reference/triton/rope/rope/reference.py": "5d9918fccb8d306580888adba6ef285019e25ef92e48810c0cf417b47db05f60",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/VERSION": "87b241b275c591694846560e9879f50c9da3150f854efdabd782c539772f3033",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/__init__.py": "0afec5dee000a6a310af804ccab47452275609f7c1feec2be7b5040d89628032",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/bench.py": "883c0ceaed2fa84bd361ed8fa98c5a807225f550d0dd5702f322aadce7c8b042",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/compat.py": "14b307939881042c654c0fa5fc23613ab30e26dbbfb56a6b3b8c627299d86845",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/env.py": "f5e5f2d0d9d5869f21fcfd42eb4345732beb19c413f147177bad9bd5fe6054b4",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/evidence.py": "bec42e10c49c10a8f52c502dd35f781f081d73b4616871a2cf36b086fc57c31b",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/gpu_info.py": "e4b566c751958b5c650032a6cac8652cf445939071f5f6b94be59252e931cec8",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/report.py": "8f0234fff3feedadcba7db0c1078b29086e81eb6d20691fbeafabf7ba3c90163",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/spec.py": "9fb645ba9c968f7bcb5a22d5a7133097a558b812d57e5835e7033c9cd189eea6",
+      "kda/kda-skills/kda-kernel-scaffold/template/_common/verify.py": "d44618fa9a08f34c7165968ef0407653dc43c85f51fdd67cff2d2fd8cea2d269"
+    },
+    "coverage": {
+      "all_workloads": [
+        "user_train",
+        "real_model",
+        "text_tail"
+      ],
+      "benchmark": false,
+      "required": {
+        "user_train": {
+          "phases": [
+            "fwd",
+            "infer",
+            "bwd"
+          ],
+          "timings": []
+        },
+        "real_model": {
+          "phases": [
+            "fwd",
+            "infer",
+            "bwd"
+          ],
+          "timings": []
+        }
+      }
+    },
+    "workloads": [
+      {
+        "name": "user_train",
+        "required": true,
+        "dtype": "bf16",
+        "fwd": {
+          "0": {
+            "max_abs": 0.001953125,
+            "max_rel": 0.049591064453125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.00390625,
+            "max_rel": 0.07246376811594203,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.0078125,
+            "max_rel": 0.217437744140625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.00390625,
+            "max_rel": 0.0152587890625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.001953125,
+            "max_rel": 0.049591064453125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 10747904,
+            "passed": true
+          }
+        },
+        "bwd_recompute": null,
+        "time_ms": {},
+        "sol_ms": {},
+        "roof_ms": {},
+        "roof_details": {},
+        "error": null,
+        "skipped": null,
+        "warnings": [],
+        "compile": null,
+        "compile_error": null,
+        "contract": null,
+        "derived": {}
+      },
+      {
+        "name": "real_model",
+        "required": true,
+        "dtype": "bf16",
+        "fwd": {
+          "0": {
+            "max_abs": 0.00048828125,
+            "max_rel": 0.020503997802734375,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 354680832,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.0009765625,
+            "max_rel": 0.030517578125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 354680832,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.0009765625,
+            "max_rel": 0.0400543212890625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 354680832,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.0009765625,
+            "max_rel": 0.0078125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 354680832,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.00048828125,
+            "max_rel": 0.020503997802734375,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 354680832,
+            "passed": true
+          }
+        },
+        "bwd_recompute": null,
+        "time_ms": {},
+        "sol_ms": {},
+        "roof_ms": {},
+        "roof_details": {},
+        "error": null,
+        "skipped": null,
+        "warnings": [],
+        "compile": null,
+        "compile_error": null,
+        "contract": null,
+        "derived": {}
+      },
+      {
+        "name": "text_tail",
+        "required": false,
+        "dtype": "bf16",
+        "fwd": {
+          "0": {
+            "max_abs": 0.0078125,
+            "max_rel": 0.209808349609375,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 449536,
+            "passed": true
+          }
+        },
+        "bwd": {
+          "0": {
+            "max_abs": 0.0078125,
+            "max_rel": 0.263214111328125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 449536,
+            "passed": true
+          },
+          "1": {
+            "max_abs": 0.015625,
+            "max_rel": 0.274658203125,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 449536,
+            "passed": true
+          },
+          "2": {
+            "max_abs": 0.015625,
+            "max_rel": 0.03814697265625,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 449536,
+            "passed": true
+          }
+        },
+        "infer": {
+          "0": {
+            "max_abs": 0.0078125,
+            "max_rel": 0.209808349609375,
+            "atol": 0.016,
+            "rtol": 0.016,
+            "reduced_over": 1,
+            "n_bad": 0,
+            "n": 449536,
+            "passed": true
+          }
+        },
+        "bwd_recompute": null,
+        "time_ms": {},
+        "sol_ms": {},
+        "roof_ms": {},
+        "roof_details": {},
+        "error": null,
+        "skipped": null,
+        "warnings": [],
+        "compile": null,
+        "compile_error": null,
+        "contract": null,
+        "derived": {}
+      }
+    ]
+  },
+  "measurement_diagnostics": [],
+  "measurement_interruption": {
+    "stage": "real_model forward, first interleaved round",
+    "reason": "Profiler processing made no completed round progress for over ten minutes; GPU idle with approximately 60 GB process resident memory. Bounded validation interrupted; no partial timing accepted.",
+    "action": "SIGINT own benchmark process; final adjoints and independent numerical verification continue serially.",
+    "performance_status": "incomplete",
+    "kernel_tuning": "No further changes.",
+    "stack_observation": "KeyboardInterrupt in _raw_profiler_samples while inspecting a raw Kineto event; not a GPU kernel failure."
+  },
+  "unmeasured_real_work_analysis": {
+    "shape": [
+      1,
+      24,
+      115456,
+      128
+    ],
+    "allowed_pairs": 180841611264,
+    "dense_pairs": 319922110464,
+    "density": 0.5652676240529791,
+    "allowed_tile_pairs": 1216800,
+    "metadata_derivation": "Aligned tiles/text: entries = allowed_tile_pairs*(tile/block)^2 + H*(2*video_blocks*text_blocks + text_blocks^2); list/count/permutation bytes = 4*entries + 12*H*query_blocks. Backward adds both passes and mask transpose.",
+    "phases": {
+      "fwd": {
+        "bytes": 2892940992,
+        "metadata_bytes": 44410560,
+        "useful_flops": 92590904967168,
+        "achievable_roof_ms": null,
+        "note": "Static work derivation only; required timing/calibration incomplete."
+      },
+      "infer": {
+        "bytes": 2881857216,
+        "metadata_bytes": 44410560,
+        "useful_flops": 92590904967168,
+        "achievable_roof_ms": null,
+        "note": "Static work derivation only; required timing/calibration incomplete."
+      },
+      "bwd": {
+        "bytes": 9635685888,
+        "metadata_bytes": 358565376,
+        "useful_flops": 231477262417920,
+        "achievable_roof_ms": null,
+        "note": "Static work derivation only; required timing/calibration incomplete."
+      }
+    }
+  },
+  "roof_model_audit": "FlashAttention-calibrated useful-work throughput; max(copy roof, dense phase time * allowed-pair density). See ../benchmark_cases.py and ../../BENCHMARKING.md.",
+  "tuning": {
+    "extra_round_authorized": true,
+    "extra_round_used": true,
+    "budget_exhausted": true
+  },
+  "acceptance_scope": "Normal model workloads required; odd-row and abnormal stress cases remain visible diagnostics. Optional recompute verified numerically; saved-state backward is the default.",
+  "published_source_hashes": {
+    "golden/kernel.py": "4bca022a5f4c275a33dca0ae2746e69fc0fe4e1a2f55eff6fb4a7790244db4f4",
+    "golden/reference.py": "8cf6b74d0ac52edf72ed275f4dc544b80cb654ddad112a488d4b96bbcaa52319"
+  },
+  "source_cleanup": {
+    "description": "Documentation paths and unused standard-library imports were cleaned after measurement. Kernel functions are unchanged; source_hashes retain the original measurement provenance.",
+    "files": {
+      "golden/kernel.py": {
+        "kind": "docstrings_and_unused_standard_imports",
+        "removed_imports": [
+          "import math"
+        ],
+        "jit_functions_unchanged": true
+      },
+      "golden/reference.py": {
+        "kind": "docstrings_only",
+        "executable_ast_sha256": "d0193c55ada3a84b2e2f275559bf271ea4e46a719f35087d70b4c30801c50655"
+      }
+    }
   }
 }

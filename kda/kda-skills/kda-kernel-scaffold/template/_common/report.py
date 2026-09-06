@@ -86,6 +86,7 @@ class WorkloadResult:
     time_ms: Dict[str, float] = field(default_factory=dict)
     sol_ms: Dict[str, Optional[float]] = field(default_factory=dict)  # per phase, datasheet peaks
     roof_ms: Dict[str, Optional[float]] = field(default_factory=dict)  # per phase, achievable (copy-calibrated)
+    roof_details: Dict[str, dict] = field(default_factory=dict)  # calibration provenance per phase
     error: Optional[str] = None
     # "needs X GiB, free Y GiB": required skips are incomplete; optional skips are notes.
     skipped: Optional[str] = None
@@ -113,6 +114,9 @@ class WorkloadResult:
 
     def sol_eff(self, phase: str) -> Optional[float]:
         """Achievable-roof efficiency; falls back to the datasheet SOL when no roof was measured."""
+        details = self.roof_details.get(phase, {})
+        if details.get("method") == "attention" and (not details.get("available", False) or self.roof_ms.get(phase) is None):
+            return None
         roof = self.roof_ms.get(phase)
         if roof is None:
             roof = self.sol_ms.get(phase)
@@ -207,12 +211,17 @@ def verdict(
             gates = phase != RECOMPUTE_PHASE or gate_recompute
             tune_level = 1 if gates else 0
             eff = r.sol_eff(phase)
-            if r.below_datasheet_roof(phase):
+            if eff is not None and r.below_datasheet_roof(phase):
                 reasons.append(
                     f"{r.name}/{phase}: kernel {r.time_ms[f'kernel_{phase}']:.3f} ms is below the datasheet roof "
                     f"{r.sol_ms[phase]:.3f} ms (SOL efficiency {eff:.2f}): roofline miscounted? audit _speed_of_light.py "
                     "(bytes once per tensor; whole GEMMs: 1 fwd, 2 bwd, 3 bwd_recompute) before reading sol_eff"
                 )
+            if r.roof_details.get(phase, {}).get("method") == "attention" and eff is None:
+                detail = r.roof_details[phase]
+                reasons.append(f"{r.name}/{phase}: attention calibration unavailable: {detail.get('reason', 'missing calibration')}")
+                if gates:
+                    level = max(level, 2)
             if eff is None:
                 reasons.append(f"{r.name}/{phase}: SOL unavailable (peaks unknown or not benchmarked)")
             elif eff < sol_threshold:

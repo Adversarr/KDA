@@ -13,4 +13,12 @@ Shapes: B 8, S 4096, D 2048, bf16. Forward and fused backward (`dx`, `dscale`). 
 function is also called on `(B, S, H, D)` tensors with D 128 (per-head), so the kernel must
 handle both a wide and a narrow last dim well.
 
-Status: TASK only.
+The ordinary eager repository is in `user_repo/`; the definition to optimize is
+`normalized/ops.py` and configuration is `normalized/__main__.py`. Run `python -m normalized
+--steps 50 --seed 0` for representative training or `python -m normalized --smoke --steps 3
+--seed 0` for a bounded correctness smoke. The latter preserves the operation's channel widths
+and head dimensions while reducing batch/token counts. It prints `median_step_ms` and
+`final_loss`.
+
+Please implement and verify forward and backward, benchmark the representative shapes, and
+integrate the result at that definition site with an eager fallback.
