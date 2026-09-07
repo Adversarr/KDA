@@ -13,6 +13,11 @@ kernels, trajectories and other run artifacts belong to that run workspace, not 
 The implementation and validation rules in `kda/` are the single source of truth; examples do
 not carry their own copy of the KDA runtime or another evaluation framework.
 
+For automated isolated runs with Cursor, Pi, Claude Code or Codex, see the
+[Python blind-evaluation runner](../scripts/BLIND_EVAL.md). It provides explicit GPU
+assignment, per-example containers, live logs, stopping and preserved run artifacts.
+Its report summary is agent-reported evidence, not independent golden acceptance.
+
 A golden is accepted only when both numerical correctness and performance correctness pass.
 Performance uses KDA's audited achievable Speed-of-Light roof and baseline gates; recorded
 timings alone do not establish acceptance. Pending, failing and tuning results must remain
