@@ -2,6 +2,7 @@
 
 import math
 import torch
+from h20_qk_norm_rope import supported as h20_supported, partial_count as h20_partials
 from kernel import qk_prep as kernel_fn
 from reference import qk_prep as reference_fn
 
@@ -69,6 +70,23 @@ def cases():
             "grad_reductions": [max(1, r) for r in _reductions(empty)],
         }
     )
+    # Exercise the same token-tiled kernels at different H and D, including tails.
+    for label, shape, strided in [
+        ("head_1_width_64", (2, 257, 1, 64), False),
+        ("head_3_width_80", (2, 257, 3, 80), True),
+        ("head_8_width_192", (2, 257, 8, 192), True),
+        ("head_16_width_256", (2, 257, 16, 256), False),
+        ("head_2_width_1024", (1, 65, 2, 1024), False),
+        ("head_3_width_4096", (1, 65, 3, 4096), True),
+    ]:
+        result.append(
+            dict(
+                name=label,
+                required=True,
+                make=lambda shape=shape, strided=strided: make(shape, strided),
+                grad_reductions=_reductions(shape),
+            )
+        )
     return result
 
 
@@ -87,6 +105,8 @@ def roof(phase, args, kwargs):
     tables = tokens * (d // 2) * 8
     saved = 8 * r
     p = 0 if r <= 128 and (d == 128) else max(1, min(b * tokens, 2 * sms))
+    if h20_supported(x):
+        p = h20_partials(x)
     if forward:
         return (
             8 * c + 8 * d + tables + (saved if phase != "infer" else 0),

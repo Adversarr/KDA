@@ -81,3 +81,6 @@ which pattern row applies. They are **not** shipped with the skill
 - [`common/speed-of-light.md`](common/speed-of-light.md): how to write the roofline for
   `_speed_of_light.py` in all four phases, what the achievable roof is, worked examples
   including the GEMM compute roof and split-K partials.
+- [`common/a800-compiler-tuning.md`](common/a800-compiler-tuning.md): measured Triton 3.6
+  compiler-option rejections and the 1152-channel AdaLN backward split; resource counts,
+  separate grid control, small-input fallback and source-matched validation.

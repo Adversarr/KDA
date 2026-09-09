@@ -4,6 +4,8 @@ One forward program owns each row. Backward programs stride over row tiles,
 accumulate parameter gradients in registers, then reduce bounded fp32 partials.
 Auxiliary mean/rstd are written only when autograd needs them.
 """
+import h20_adaln
+
 import torch
 import triton
 import triton.language as tl
@@ -136,7 +138,7 @@ def _backward(DY, DH, H, R, W, BIAS, G, VALID, MEAN, INV,
         elif MODE == 0:
             tl.store(DR + row[:, None] * D + d[None, :], grad, mask)
         tl.store(DX + row[:, None] * D + d[None, :], grad, mask)
-    off = (batch.to(tl.int64) * programs + pid) * D + d
+    off = (batch.to(tl.int64) * programs + pid.to(tl.int64)) * D + d
     tl.store(PW + off, tl.sum(dw, 0), d < D)
     if MODE != 1:
         tl.store(PB + off, tl.sum(db, 0), d < D)
@@ -148,9 +150,9 @@ def _backward(DY, DH, H, R, W, BIAS, G, VALID, MEAN, INV,
 def _parameter_reduce(PW, PB, DW, DB, P: tl.constexpr, D: tl.constexpr,
                       BP: tl.constexpr, BC: tl.constexpr):
     """Combine scale and bias partials in one launch, independently per batch."""
-    columns = tl.program_id(0) * BC + tl.arange(0, BC)
+    columns = tl.program_id(0).to(tl.int64) * BC + tl.arange(0, BC)
     rows = tl.arange(0, BP)
-    batch = tl.program_id(1)
+    batch = tl.program_id(1).to(tl.int64)
     offset = (batch * P + rows[:, None]) * D + columns[None, :]
     mask = (rows[:, None] < P) & (columns[None, :] < D)
     dw = tl.sum(tl.load(PW + offset, mask, 0), 0)
@@ -190,17 +192,20 @@ def _split_forward(X, W, BIAS, Y, MEAN, INV, TOKENS: tl.constexpr,
 
 
 @triton.jit
-def _split_silu_backward(DY, X, W, BIAS, MEAN, INV, DX, PW, PB,
+def _split_backward(DY, X, W, BIAS, MEAN, INV, DX, PW, PB,
                          TOKENS: tl.constexpr, SW, SB, SX, SX2, SX3,
-                         SY, SY2, SY3, SYD, N1: tl.constexpr, N2: tl.constexpr):
-    """1152 live channels, split as 1024+128 without masked SFU arithmetic."""
-    pid, batch = tl.program_id(0), tl.program_id(1)
+                         SY, SY2, SY3, SYD, N1: tl.constexpr, N2: tl.constexpr,
+                         SILU: tl.constexpr):
+    """1152 live channels, split as 1024+128 without padded reduction/activation work."""
+    pid = tl.program_id(0)
+    batch = tl.program_id(1).to(tl.int64)
     programs = tl.num_programs(0)
     a, b = tl.arange(0, 1024), tl.arange(0, 128)
     wa = 1. + tl.load(W + batch * SW + a)
     wb = 1. + tl.load(W + batch * SW + 1024 + b)
-    ba = tl.load(BIAS + batch * SB + a)
-    bb = tl.load(BIAS + batch * SB + 1024 + b)
+    if SILU:
+        ba = tl.load(BIAS + batch * SB + a)
+        bb = tl.load(BIAS + batch * SB + 1024 + b)
     dwa, dba = tl.full((1024,), 0., tl.float32), tl.full((1024,), 0., tl.float32)
     dwb, dbb = tl.full((128,), 0., tl.float32), tl.full((128,), 0., tl.float32)
     for token in range(pid, TOKENS, programs):
@@ -210,13 +215,14 @@ def _split_silu_backward(DY, X, W, BIAS, MEAN, INV, DX, PW, PB,
         mean, inv = tl.load(MEAN + row), tl.load(INV + row)
         na = (tl.load(source + a).to(tl.float32) - mean) * inv
         nb = (tl.load(source + 1024 + b).to(tl.float32) - mean) * inv
-        pa = (na * wa + ba).to(DY.dtype.element_ty).to(tl.float32)
-        pb = (nb * wb + bb).to(DY.dtype.element_ty).to(tl.float32)
-        sa, sb = 1. / (1. + tl.exp(-pa)), 1. / (1. + tl.exp(-pb))
         da = tl.load(adjoint + a * SYD).to(tl.float32)
         db = tl.load(adjoint + (1024 + b) * SYD).to(tl.float32)
-        da = (da * sa * (1. + pa * (1. - sa))).to(DY.dtype.element_ty).to(tl.float32)
-        db = (db * sb * (1. + pb * (1. - sb))).to(DY.dtype.element_ty).to(tl.float32)
+        if SILU:
+            pa = (na * wa + ba).to(DY.dtype.element_ty).to(tl.float32)
+            pb = (nb * wb + bb).to(DY.dtype.element_ty).to(tl.float32)
+            sa, sb = 1. / (1. + tl.exp(-pa)), 1. / (1. + tl.exp(-pb))
+            da = (da * sa * (1. + pa * (1. - sa))).to(DY.dtype.element_ty).to(tl.float32)
+            db = (db * sb * (1. + pb * (1. - sb))).to(DY.dtype.element_ty).to(tl.float32)
         dna, dnb = da * wa, db * wb
         avg = (tl.sum(dna, 0) + tl.sum(dnb, 0)) / 1152
         projection = (tl.sum(dna * na, 0) + tl.sum(dnb * nb, 0)) / 1152
@@ -226,7 +232,7 @@ def _split_silu_backward(DY, X, W, BIAS, MEAN, INV, DX, PW, PB,
         dwb += db * nb
         dba += da
         dbb += db
-    target = (batch.to(tl.int64) * programs + pid) * 1152
+    target = (batch * programs + pid.to(tl.int64)) * 1152
     tl.store(PW + target + a, dwa)
     tl.store(PW + target + 1024 + b, dwb)
     tl.store(PB + target + a, dba)
@@ -240,7 +246,8 @@ def _small_silu_backward(DY, X, W, BIAS, MEAN, INV, DX, DW, DB,
                          N1: tl.constexpr, N2: tl.constexpr,
                          BD: tl.constexpr, BT: tl.constexpr, BC: tl.constexpr):
     """Each token computes dx and owns disjoint modulation-gradient columns."""
-    token, batch = tl.program_id(0), tl.program_id(1)
+    token = tl.program_id(0).to(tl.int64)
+    batch = tl.program_id(1).to(tl.int64)
     row = batch.to(tl.int64) * T + token
     d = tl.arange(0, BD)
     x = tl.load(X + _offset(row, N1, N2, SX, SX2, SX3) + d, d < D, 0).to(tl.float32)
@@ -279,6 +286,13 @@ class _Norm(torch.autograd.Function):
     def forward(ctx, x, residual, weight, bias, gamma, valid, eps, silu, out_dtype, save):
         rows, d = x.numel() // x.shape[-1], x.shape[-1]
         tokens = x.shape[1] if MODE == 2 else rows
+        ctx.h20 = h20_adaln.supported(x)
+        if ctx.h20:
+            y, mean, inv = h20_adaln.fwd(x, weight, bias, eps, silu, save)
+            if save:
+                ctx.save_for_backward(x, residual, weight, bias, gamma, valid, mean, inv)
+                ctx.silu, ctx.x_dtype = silu, x.dtype
+            return y
         y = torch.empty(x.shape, device=x.device, dtype=out_dtype)
         stream = torch.empty(x.shape, device=x.device, dtype=torch.float32) if MODE in (0, 3) else x
         mean = torch.empty(rows if save else 0, device=x.device, dtype=torch.float32)
@@ -300,11 +314,17 @@ class _Norm(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grads):
         h, residual, weight, bias, gamma, valid, mean, inv = ctx.saved_tensors
+        if ctx.h20:
+            dx, dw, db = h20_adaln.bwd(grads[-1], h, weight, bias, mean, inv, ctx.silu)
+            return dx, None, dw, db, None, None, None, None, None, None
         rows, d = h.numel() // h.shape[-1], h.shape[-1]
         tokens = h.shape[1] if MODE == 2 else rows
         batches = h.shape[0] if MODE == 2 else 1
-        program_scale = 12 if ctx.silu and d == 1152 else 2
-        programs = max(1, min(triton.cdiv(tokens, 4), max(1, program_scale * torch.cuda.get_device_properties(h.device).multi_processor_count // max(1, batches))))
+        gpu = torch.cuda.get_device_properties(h.device)
+        split_plain = (not ctx.silu and d == 1152 and tokens >= 1024 and rows >= 8192
+                       and ctx.x_dtype == torch.bfloat16 and "A800" in gpu.name)
+        program_scale = 12 if ctx.silu and d == 1152 else (8 if split_plain else 2)
+        programs = max(1, min(triton.cdiv(tokens, 4), max(1, program_scale * gpu.multi_processor_count // max(1, batches))))
         small = tokens <= 32 and d <= 256
         if small:
             programs = 1
@@ -331,12 +351,12 @@ class _Norm(torch.autograd.Function):
                 triton.next_power_of_2(d), triton.next_power_of_2(tokens),
                 triton.next_power_of_2(triton.cdiv(d, tokens)), num_warps=4)
             return dx, None, dw, db, None, None, None, None, None, None
-        if rows and ctx.silu and d == 1152:
-            _split_silu_backward[(programs, batches)](
+        if rows and d == 1152 and (ctx.silu or split_plain):
+            _split_backward[(programs, batches)](
                 dy, h, weight, bias, mean, inv, dx, pw, pb,
                 tokens, weight.stride(0), bias.stride(0), _stride(h), *_outer(h),
                 gradient_stride(dy), *_outer(dy), dy.stride(-1),
-                h.shape[-2], h.shape[-3] if h.ndim >= 3 else 1, num_warps=4)
+                h.shape[-2], h.shape[-3] if h.ndim >= 3 else 1, ctx.silu, num_warps=4)
         elif rows:
             _backward[(programs, batches)](dy, dh, h, residual, weight, bias, gamma, valid,
                 mean, inv, dx, dr, pw, pb, pg, rows, d, tokens, weight.stride(0), bias.stride(0),

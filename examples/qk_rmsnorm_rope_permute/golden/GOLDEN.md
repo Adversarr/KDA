@@ -35,10 +35,10 @@ promise elsewhere.
 | forward (inference) | 0.3208 ms | 8.4668 ms | 0.6238 ms | 98.0% |
 | backward | 0.5881 ms | 13.7416 ms | 1.1866 ms | 79.8% |
 
-Final verdict: **pass**. The fresh full report covers 4 workloads, including every required
+Historical A800 verdict: **pass**. That report covers the original 4 workloads, including every required
 output, inference and gradient check. Independent adjoints also pass. All numerical results,
 per-workload timings, copy roofs and raw rounds are recorded in `golden.json`; the recorded
-kernel and reference hashes match these sources. Small latency-bound rows retain the runtime's
+kernel and reference hashes identify the sources measured at that time. Small latency-bound rows retain the runtime's
 10-us SoL waiver and 1-us absolute baseline parity rule.
 
 ## Traffic and arithmetic
@@ -75,3 +75,31 @@ and per-phase bytes/FLOPs. The [shared runner](../../_benchmark.py) uses KDA's p
 directly. Reports are generated outside `golden/`; new numerical and timing reports require an
 independent acceptance audit. Use a distinct output filename for scoped `--workload` or
 `--fwd-only` runs.
+
+## Parameterized H20 implementation (2026-09-09)
+
+`h20_qk_norm_rope.py` replaces the former narrow model-size specialization. `TUNED.json` records the frozen selector and measured configurations; `h20.json` contains source-matched measurements, independent eager adjoints, boundary checks and the former narrow evidence under `historical_capture`. The A800 section above and `golden.json` describe their historical workload suite; this expanded suite was not remeasured on A800.
+
+H and even D=2…8192 are compile-time parameters, including masked non-power-of-two half-channel tails. No H=32/D=128 equality guard remains. The public Q/K path launches both inputs in one grid, reusing the parameterized single-input computation with separate Q/K strides. Backward writes per-head/token-tile fp32 partials and combines both weight gradients in one final reduction launch. Single-input entry points remain available.
+
+Four half-width buckets choose forward/backward token tiles and warps; head count and short token sequences determine reduction waves. Each input has `H*max(1,min(ceil(B*S/BT),waves*SMs//H))` partial rows. The bf16 norm output and inverse-RoPE adjoint boundaries remain explicit.
+
+Automatic dispatch requires H20, more than 128 total head/activation rows and more than 32 tokens per sample (AdaLN) or B*S tokens (QK). Small, empty, other-device and out-of-range widths retain the existing path. There is no runtime autotuning or KDA runtime import.
+
+The expanded required suite has 10 workloads. All output, inference and gradient checks pass, plus 26 boundary/layout cases and 21 independent eager/autograd adjoint scenarios. Boundary coverage includes width and dispatch boundaries, non-power-of-two tails, independently permuted outer axes, channel-strided/broadcast upstreams, empty inputs and a float64 process default dtype. Forced legacy dispatch is bitwise identical to the saved original implementation on all required cases.
+
+Same-input paired comparisons use profiler device time, cold L2, three interleaved rounds, three warmups and ten timed iterations. Each cell below is the geometric mean across the measured matrix, followed by its range; these are sample-matrix summaries, not guarantees for every supported shape.
+
+| Phase | Geometric mean speedup vs original generic golden | Range |
+|---|---:|---:|
+| fwd | 1.66× | 1.05–6.23× |
+| bwd | 3.52× | 2.02–7.07× |
+| infer | 1.62× | 1.03–5.22× |
+
+Full benchmark performance status: **`pass`**. Calibration, numerical tolerances and performance thresholds are unchanged; byte accounting follows the actual partial count.
+All applicable gates pass in the expanded suite. Small latency-bound cases retain the existing documented gate exceptions.
+
+```sh
+python examples/qk_rmsnorm_rope_permute/benchmark.py --verify --bench --json /tmp/qk-h20-general-fresh.json
+python examples/qk_rmsnorm_rope_permute/benchmark.py --adjoint --workload user_train --json /tmp/qk-h20-general-adjoint-fresh.json
+```

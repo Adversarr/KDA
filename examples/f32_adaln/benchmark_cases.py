@@ -2,6 +2,7 @@
 
 import torch
 from kernel import adaln as kernel_fn
+from h20_adaln import supported as h20_supported, partial_count as h20_partials
 from reference import adaln as reference_fn
 
 ROOF = "fp32"
@@ -90,6 +91,27 @@ def cases():
             "grad_reductions": _reductions(PRIMARY),
         }
     )
+    # Parameterized H20 coverage: power-of-two, masked tails, wide rows and SiLU.
+    for label, shape, strided, special in [
+        ("width_128", (3, 257, 128), False, None),
+        ("width_768", (3, 257, 768), True, None),
+        ("width_1300", (3, 257, 1300), True, None),
+        ("width_2048", (3, 257, 2048), False, None),
+        ("width_4096", (3, 257, 4096), True, None),
+        ("width_8192", (3, 257, 8192), False, None),
+        ("silu_tail", (3, 257, 1300), True, "silu"),
+        ("silu_wide", (3, 257, 4096), False, "silu"),
+    ]:
+        result.append(
+            dict(
+                name=label,
+                required=True,
+                make=lambda shape=shape, strided=strided, special=special: make(
+                    shape, strided, special
+                ),
+                grad_reductions=_reductions(shape),
+            )
+        )
     return result
 
 
@@ -103,12 +125,23 @@ def roof(phase, args, kwargs):
     (c, d) = (x.numel(), x.shape[-1])
     r = c // d
     forward = phase in ("fwd", "infer")
-    sms = torch.cuda.get_device_properties(x.device).multi_processor_count
+    gpu = torch.cuda.get_device_properties(x.device)
+    sms = gpu.multi_processor_count
     aux = 8 * r if phase != "infer" else 0
     (b, tokens, _) = x.shape
     silu = kwargs.get("silu", False)
-    program_scale = 12 if silu and d == 1152 else 2
+    split_plain = (
+        not silu
+        and d == 1152
+        and tokens >= 1024
+        and r >= 8192
+        and x.dtype == torch.bfloat16
+        and "A800" in gpu.name
+    )
+    program_scale = 12 if silu and d == 1152 else (8 if split_plain else 2)
     p = max(1, min((tokens + 3) // 4, max(1, program_scale * sms // max(1, b))))
+    if h20_supported(x):
+        p = h20_partials(x, silu)
     if tokens <= 32 and d <= 256:
         p = 0  # One program writes final parameter gradients directly.
     if forward:

@@ -1,0 +1,376 @@
+{
+  "gpu": "NVIDIA H20",
+  "torch": "2.11.0+cu128",
+  "triton": "3.6.0",
+  "date": "2026-09-09",
+  "performance_status": "tune",
+  "source_hashes": {
+    "golden/h20_adaln.py": "c535aedab6f77df2b9bc9842d7d4f4a8094e06d2a4c2bbbea9cfac66893f0159",
+    "golden/kernel.py": "aaee1a98c414ed15a0e225eeb2334a799b7d9d0e8919cbbd7fcab8d1749dafb3",
+    "golden/reference.py": "dc20c5f192b1248e5b2b73386e693fa0b86fa2921453e8416c0fc7cf453a69de"
+  },
+  "branches": [
+    {
+      "condition": "next_power_of_2(D) <= 1024"
+    },
+    {
+      "condition": "1024 < next_power_of_2(D) <= 2048"
+    },
+    {
+      "condition": "2048 < next_power_of_2(D) <= 4096"
+    },
+    {
+      "condition": "4096 < next_power_of_2(D) <= 8192"
+    }
+  ],
+  "selector_source": "def select_config(d, tokens, silu, save=True):\n    \"\"\"Size-derived rules, shared by all widths; no shape lookup table.\"\"\"\n    block = triton.next_power_of_2(d)\n    if block <= 1024:\n        bt = 8 if silu or d == block else 4\n        (fw, bw) = (4 if silu else 2, 2)\n        waves = 16 if silu or block <= 256 else 8\n    elif block <= 2048:\n        bt = (8 if save else 4) if silu and d < block else 4 if silu or d < block else 8\n        fw = 4 if silu or d == block else 2\n        bw = 4 if silu else 2\n        waves = (8 if d == block else 12) if silu else 4 if d >= block * 3 // 4 else 8\n    elif block <= 4096:\n        (bt, fw, bw, waves) = (2 if silu else 4, 4, 4, 8)\n    else:\n        bt = 1 if silu or tokens < 512 else 2\n        (fw, bw, waves) = (8 if bt == 1 else 4, 8, 8)\n    head = 1 << d.bit_length() - 1\n    tail = triton.next_power_of_2(max(1, d - head))\n    tail_padding = tail - (d - head) if d > head else 0\n    split = silu and block <= 2048\n    if split:\n        if tail_padding > d // 8:\n            (bt, fw, bw, waves, split) = (4, 4, 2, 4, False)\n        else:\n            row_budget = max(1, 12288 // (head + (tail if d > head else 0)))\n            bt = min(bt, 1 << row_budget.bit_length() - 1)\n    return dict(bt=bt, fw=fw, split=split, bw=bw, waves=waves)",
+  "measured_configurations": [
+    {
+      "shape": [
+        4,
+        2048,
+        128
+      ],
+      "silu": false,
+      "config": {
+        "bt": 8,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 16
+      },
+      "inference_config": {
+        "bt": 8,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 16
+      },
+      "partials": 312
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        256
+      ],
+      "silu": false,
+      "config": {
+        "bt": 8,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 16
+      },
+      "inference_config": {
+        "bt": 8,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 16
+      },
+      "partials": 312
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        768
+      ],
+      "silu": false,
+      "config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        1024
+      ],
+      "silu": false,
+      "config": {
+        "bt": 8,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 8,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        1300
+      ],
+      "silu": false,
+      "config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        1536
+      ],
+      "silu": false,
+      "config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 4
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 4
+      },
+      "partials": 78
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        2048
+      ],
+      "silu": false,
+      "config": {
+        "bt": 8,
+        "fw": 4,
+        "split": false,
+        "bw": 2,
+        "waves": 4
+      },
+      "inference_config": {
+        "bt": 8,
+        "fw": 4,
+        "split": false,
+        "bw": 2,
+        "waves": 4
+      },
+      "partials": 78
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        4096
+      ],
+      "silu": false,
+      "config": {
+        "bt": 4,
+        "fw": 4,
+        "split": false,
+        "bw": 4,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 4,
+        "split": false,
+        "bw": 4,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        8192
+      ],
+      "silu": false,
+      "config": {
+        "bt": 2,
+        "fw": 4,
+        "split": false,
+        "bw": 8,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 2,
+        "fw": 4,
+        "split": false,
+        "bw": 8,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        768
+      ],
+      "silu": true,
+      "config": {
+        "bt": 8,
+        "fw": 4,
+        "split": true,
+        "bw": 2,
+        "waves": 16
+      },
+      "inference_config": {
+        "bt": 8,
+        "fw": 4,
+        "split": true,
+        "bw": 2,
+        "waves": 16
+      },
+      "partials": 312
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        1300
+      ],
+      "silu": true,
+      "config": {
+        "bt": 4,
+        "fw": 4,
+        "split": false,
+        "bw": 2,
+        "waves": 4
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 4,
+        "split": false,
+        "bw": 2,
+        "waves": 4
+      },
+      "partials": 78
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        2048
+      ],
+      "silu": true,
+      "config": {
+        "bt": 4,
+        "fw": 4,
+        "split": true,
+        "bw": 4,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 4,
+        "split": true,
+        "bw": 4,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        4,
+        2048,
+        4096
+      ],
+      "silu": true,
+      "config": {
+        "bt": 2,
+        "fw": 4,
+        "split": false,
+        "bw": 4,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 2,
+        "fw": 4,
+        "split": false,
+        "bw": 4,
+        "waves": 8
+      },
+      "partials": 156
+    },
+    {
+      "shape": [
+        16,
+        4096,
+        1152
+      ],
+      "silu": false,
+      "config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 2,
+        "split": false,
+        "bw": 2,
+        "waves": 8
+      },
+      "partials": 39
+    },
+    {
+      "shape": [
+        16,
+        4096,
+        1152
+      ],
+      "silu": true,
+      "config": {
+        "bt": 8,
+        "fw": 4,
+        "split": true,
+        "bw": 4,
+        "waves": 12
+      },
+      "inference_config": {
+        "bt": 4,
+        "fw": 4,
+        "split": true,
+        "bw": 4,
+        "waves": 12
+      },
+      "partials": 58
+    }
+  ],
+  "default": "Original kernel.py paths on other devices and on small/empty workloads.",
+  "evidence": "h20.json"
+}

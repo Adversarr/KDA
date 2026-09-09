@@ -15,6 +15,8 @@ reduction from a second read of ``x``).
 
 from typing import Tuple
 
+import h20_qk_norm_rope
+
 import torch
 import triton
 import triton.language as tl
@@ -145,6 +147,8 @@ def rmsnorm_rope_permute_fwd(
     """
     B, S, H, D = x.shape
     assert x.stride(3) == 1 and w.is_contiguous() and cos.is_contiguous() and sin.is_contiguous()
+    if h20_qk_norm_rope.supported(x):
+        return h20_qk_norm_rope.fwd(x, w, cos, sin, eps, save_rstd)
     block_h, block_dh, warps = _geometry(H, D)
     # forward tiles may be smaller than a full token: split heads to keep ~2K elements per program
     fwd_block_h = max(1, min(block_h, 2048 // block_dh))
@@ -165,6 +169,8 @@ def rmsnorm_rope_permute_bwd(dy: torch.Tensor, x: torch.Tensor, w: torch.Tensor,
     """``dy (B, H, S, D)`` -> ``(dx (B, S, H, D) contiguous, dw (D,) in w.dtype)``."""
     B, S, H, D = x.shape
 
+    if h20_qk_norm_rope.supported(x):
+        return h20_qk_norm_rope.bwd(dy, x, w, cos, sin, rstd)
     block_h, block_dh, warps = _geometry(H, D)
     T = B * S
     n_programs = max(1, min(T, 2 * torch.cuda.get_device_properties(x.device).multi_processor_count))
@@ -318,4 +324,6 @@ def qk_prep(q, k, q_norm_w, k_norm_w, cos, sin, eps=1e-6):
     if 0 < rows <= 128 and d == 128:
         save=torch.is_grad_enabled() and any(t.requires_grad for t in (q,k,q_norm_w,k_norm_w))
         return _SmallPair.apply(q,k,q_norm_w,k_norm_w,cos,sin,eps,save)
+    if h20_qk_norm_rope.supported(q):
+        return h20_qk_norm_rope.pair(q, k, q_norm_w, k_norm_w, cos, sin, eps)
     return rmsnorm_rope_permute(q, q_norm_w, cos, sin, eps), rmsnorm_rope_permute(k, k_norm_w, cos, sin, eps)
