@@ -9,7 +9,7 @@ def padded_attention(q, k, v, key_valid):
     logits = logits.masked_fill(~key_valid[:, None, None, :], float("-inf"))
     prob = torch.softmax(logits, dim=-1)
     prob = torch.nan_to_num(prob, nan=0.0, posinf=0.0, neginf=0.0)
-    return torch.matmul(prob, v.float()).to(v.dtype)
+    return torch.matmul(prob.to(v.dtype).float(), v.float()).to(v.dtype)
 ```
 
 Dense and non-causal; the only mask is *key validity per batch entry*: padded patches and padded
@@ -19,7 +19,11 @@ already sanitised before the call (`key_valid_from_token_valid`: a view with no 
 key 0 as a dummy), so every row has at least one allowed key and the `nan_to_num` never fires in
 practice; keep it out of the kernel. Padded *queries* are computed like any other row and zeroed
 later, after the output projection. The softmax is fp32 (the function turns autocast off inside;
-q, k, v arrive as bf16).
+q, k, v arrive as bf16). Before PV, probabilities may round to the input dtype,
+as in FlashAttention; PV accumulates in fp32 and the output returns to bf16. Backward
+may similarly use low-precision tensor-core operands with fp32 accumulation. Numerical
+verification tolerances are unchanged. This precision convention was explicitly adopted on
+2026-09-08; earlier FP32-probability performance records describe a stricter contract.
 
 The kernel is called twice per block pair with very different shapes: the frame block folds the
 views into the batch (`B * S` sequences of `T` tokens), the global block sees every token of
@@ -42,3 +46,11 @@ is; do not fuse it into this kernel.
 For a bounded correctness smoke, run `python -m multiview.train --smoke --steps 3 --seed 0` from
 `user_repo/`. This keeps target channel/head dimensions but reduces batch/token counts; use the
 unmodified representative config for performance measurements.
+
+The eager fixture spells out the Flash-style adjoint with PyTorch matrix operations:
+`dP` and the row reduction `delta = sum(output * dOutput)` are fp32; `P` rounds
+before dV and `dS = P * (dP - delta)` rounds before dQ/dK products. Gradient
+products accumulate in fp32. This is the permitted mixed-precision adjoint,
+not the additional gradient cast inserted by naive autograd through a bf16
+probability tensor. Online softmax may round unnormalized block weights before
+PV and normalize the fp32 output accumulator afterward, as FlashAttention does.

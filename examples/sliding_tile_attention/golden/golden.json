@@ -1423,5 +1423,15 @@
         "executable_ast_sha256": "d0193c55ada3a84b2e2f275559bf271ea4e46a719f35087d70b4c30801c50655"
       }
     }
+  },
+  "closeout_audit": {
+    "date": "2026-09-09",
+    "status": "incomplete",
+    "reason": "H20 real_model CUDA-only capture reached backward round 3/3 then timed out at 5400 seconds before writing a complete report. Missing performance evidence is not a near-gate waiver.",
+    "timeout_seconds": 5400,
+    "published_source_hashes": {
+      "golden/kernel.py": "4bca022a5f4c275a33dca0ae2746e69fc0fe4e1a2f55eff6fb4a7790244db4f4",
+      "golden/reference.py": "06cf63a7aed75232ee60430b14456a7310f3517121f9232a5733571d9a980e37"
+    }
   }
 }

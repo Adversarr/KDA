@@ -190,6 +190,50 @@ def _split_forward(X, W, BIAS, Y, MEAN, INV, TOKENS: tl.constexpr,
 
 
 @triton.jit
+def _split_silu_backward(DY, X, W, BIAS, MEAN, INV, DX, PW, PB,
+                         TOKENS: tl.constexpr, SW, SB, SX, SX2, SX3,
+                         SY, SY2, SY3, SYD, N1: tl.constexpr, N2: tl.constexpr):
+    """1152 live channels, split as 1024+128 without masked SFU arithmetic."""
+    pid, batch = tl.program_id(0), tl.program_id(1)
+    programs = tl.num_programs(0)
+    a, b = tl.arange(0, 1024), tl.arange(0, 128)
+    wa = 1. + tl.load(W + batch * SW + a)
+    wb = 1. + tl.load(W + batch * SW + 1024 + b)
+    ba = tl.load(BIAS + batch * SB + a)
+    bb = tl.load(BIAS + batch * SB + 1024 + b)
+    dwa, dba = tl.full((1024,), 0., tl.float32), tl.full((1024,), 0., tl.float32)
+    dwb, dbb = tl.full((128,), 0., tl.float32), tl.full((128,), 0., tl.float32)
+    for token in range(pid, TOKENS, programs):
+        row = batch.to(tl.int64) * TOKENS + token
+        source = X + _offset(row, N1, N2, SX, SX2, SX3)
+        adjoint = DY + _offset(row, N1, N2, SY, SY2, SY3)
+        mean, inv = tl.load(MEAN + row), tl.load(INV + row)
+        na = (tl.load(source + a).to(tl.float32) - mean) * inv
+        nb = (tl.load(source + 1024 + b).to(tl.float32) - mean) * inv
+        pa = (na * wa + ba).to(DY.dtype.element_ty).to(tl.float32)
+        pb = (nb * wb + bb).to(DY.dtype.element_ty).to(tl.float32)
+        sa, sb = 1. / (1. + tl.exp(-pa)), 1. / (1. + tl.exp(-pb))
+        da = tl.load(adjoint + a * SYD).to(tl.float32)
+        db = tl.load(adjoint + (1024 + b) * SYD).to(tl.float32)
+        da = (da * sa * (1. + pa * (1. - sa))).to(DY.dtype.element_ty).to(tl.float32)
+        db = (db * sb * (1. + pb * (1. - sb))).to(DY.dtype.element_ty).to(tl.float32)
+        dna, dnb = da * wa, db * wb
+        avg = (tl.sum(dna, 0) + tl.sum(dnb, 0)) / 1152
+        projection = (tl.sum(dna * na, 0) + tl.sum(dnb * nb, 0)) / 1152
+        tl.store(DX + row * 1152 + a, inv * (dna - avg - na * projection))
+        tl.store(DX + row * 1152 + 1024 + b, inv * (dnb - avg - nb * projection))
+        dwa += da * na
+        dwb += db * nb
+        dba += da
+        dbb += db
+    target = (batch.to(tl.int64) * programs + pid) * 1152
+    tl.store(PW + target + a, dwa)
+    tl.store(PW + target + 1024 + b, dwb)
+    tl.store(PB + target + a, dba)
+    tl.store(PB + target + 1024 + b, dbb)
+
+
+@triton.jit
 def _small_silu_backward(DY, X, W, BIAS, MEAN, INV, DX, DW, DB,
                          T: tl.constexpr, D: tl.constexpr, SW, SB,
                          SX, SX2, SX3, SY, SY2, SY3, SYD,
@@ -259,7 +303,7 @@ class _Norm(torch.autograd.Function):
         rows, d = h.numel() // h.shape[-1], h.shape[-1]
         tokens = h.shape[1] if MODE == 2 else rows
         batches = h.shape[0] if MODE == 2 else 1
-        program_scale = 4 if ctx.silu and d == 1152 else 2
+        program_scale = 12 if ctx.silu and d == 1152 else 2
         programs = max(1, min(triton.cdiv(tokens, 4), max(1, program_scale * torch.cuda.get_device_properties(h.device).multi_processor_count // max(1, batches))))
         small = tokens <= 32 and d <= 256
         if small:
@@ -287,7 +331,13 @@ class _Norm(torch.autograd.Function):
                 triton.next_power_of_2(d), triton.next_power_of_2(tokens),
                 triton.next_power_of_2(triton.cdiv(d, tokens)), num_warps=4)
             return dx, None, dw, db, None, None, None, None, None, None
-        if rows:
+        if rows and ctx.silu and d == 1152:
+            _split_silu_backward[(programs, batches)](
+                dy, h, weight, bias, mean, inv, dx, pw, pb,
+                tokens, weight.stride(0), bias.stride(0), _stride(h), *_outer(h),
+                gradient_stride(dy), *_outer(dy), dy.stride(-1),
+                h.shape[-2], h.shape[-3] if h.ndim >= 3 else 1, num_warps=4)
+        elif rows:
             _backward[(programs, batches)](dy, dh, h, residual, weight, bias, gamma, valid,
                 mean, inv, dx, dr, pw, pb, pg, rows, d, tokens, weight.stride(0), bias.stride(0),
                 _stride(h), _stride(residual), gradient_stride(dy), dy.stride(-1),

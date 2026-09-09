@@ -28,6 +28,14 @@ corrected version passes that audit. Inputs preserve batch/head/row strides and 
 final stride. Outputs and input gradients retain their storage dtype; the mask has no gradient.
 No gradient atomics or token-by-token mask allocation are used.
 
+The bounded large reference now groups 512 queries per head, without changing its
+rounding boundaries or FP32 cross-chunk gradient accumulation. Large-workload
+revalidation uses CUDA-only CUPTI collection to avoid CPU trace materialization.
+Bounded/dense equivalence checks pass on A800 and H20. The interrupted CPU+CUDA
+capture remains preserved. The 2026-09-08 CUDA-only H20 run advanced through all three
+forward/inference rounds and reached backward round 3, then hit its 5400-second timeout
+before writing a complete report. No timing or acceptance is inferred from those progress logs.
+
 ## A800 measurements
 
 Profiler device times on 2026-09-06, minimum of three interleaved rounds with fresh compiler
@@ -74,7 +82,7 @@ useful-work numerator excludes duplicated products, sparse scheduling overhead a
 emulation. This calibration estimates throughput; it is not an exact sparse-latency prediction
 or a correctness reference. See the [SoL audit](../../BENCHMARKING.md).
 
-Both normal model workloads are required. The 70% SoL and 95% baseline gates remain unchanged;
+Both normal model workloads are required. The approved 68–70% SoL margin and 95% baseline gate apply;
 roofs below 10 microseconds retain the SoL waiver and existing 1-microsecond absolute baseline
 allowance. Missing profiler evidence remains incomplete, and optional stress failures cannot
 waive a required model row.

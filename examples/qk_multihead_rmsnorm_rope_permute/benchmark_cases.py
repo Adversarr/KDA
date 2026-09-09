@@ -61,6 +61,8 @@ def roof(phase, args, kwargs):
         q.shape[0] * q.shape[1],
         2 * torch.cuda.get_device_properties(q.device).multi_processor_count,
     )
+    if 0 < q.shape[0] * q.shape[1] <= 32:
+        programs = 0  # The short-sequence backward writes final per-head gradients.
     return n * 6 + tables + weights * 2 + rows * 4 + 2 * programs * weights, n * 18
 
 

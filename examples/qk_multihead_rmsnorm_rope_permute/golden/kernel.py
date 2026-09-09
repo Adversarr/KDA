@@ -109,6 +109,37 @@ def _fused_bwd_kernel(
     tl.store(dw_partial_ptr + (pid.to(tl.int64) * H + offs_h[:, None]) * D + offs_d[None, :], dw, mask=mask)
 
 
+@triton.jit
+def _small_bwd_kernel(
+    DY, X, W, COS, SIN, RSTD, DX, DW,
+    T: tl.constexpr, S: tl.constexpr, H: tl.constexpr, D: tl.constexpr,
+    XB, XS, XH, YB, YH, YS, YD,
+    BT: tl.constexpr, BDH: tl.constexpr,
+):
+    # One head owns every short-sequence token and writes its final weight gradient.
+    head = tl.program_id(0).to(tl.int64)
+    token = tl.arange(0, BT).to(tl.int64)
+    channel = tl.arange(0, 2 * BDH)
+    pair = tl.arange(0, BDH)
+    batch, pos = token // S, token % S
+    mask = (token[:, None] < T) & (channel[None, :] < D)
+    dy = tl.load(DY + batch[:, None] * YB + head * YH + pos[:, None] * YS + channel[None, :] * YD, mask, 0).to(tl.float32)
+    pmask = (token[:, None] < T) & (pair[None, :] < D // 2)
+    cos = tl.load(COS + pos[:, None] * (D // 2) + pair[None, :], pmask, 0)
+    sin = tl.load(SIN + pos[:, None] * (D // 2) + pair[None, :], pmask, 0)
+    dn = _rotate(dy, cos, -sin, BT, BDH).to(X.dtype.element_ty).to(tl.float32)
+    x = tl.load(X + batch[:, None] * XB + pos[:, None] * XS + head * XH + channel[None, :], mask, 0).to(tl.float32)
+    inv = tl.load(RSTD + token * H + head, token < T, 0)
+    w = tl.load(W + head * D + channel, channel < D, 0).to(tl.float32)
+    normalized = x * inv[:, None]
+    dxhat = dn * w[None, :]
+    dot = tl.sum(dxhat * normalized, 1) / D
+    dx = inv[:, None] * (dxhat - normalized * dot[:, None])
+    tl.store(DX + (token[:, None] * H + head) * D + channel[None, :], dx, mask)
+    dw = tl.sum(tl.where(mask, dn * normalized, 0.), 0)
+    tl.store(DW + head * D + channel, dw, channel < D)
+
+
 def _geometry(H: int, D: int) -> Tuple[int, int, int]:
     """(BLOCK_H, BLOCK_DH, num_warps). The backward holds every head of a token, and its dw, in one tile."""
     assert D % 2 == 0, "head dim must be even"
@@ -153,6 +184,14 @@ def rmsnorm_rope_permute_bwd(
     T = B * S
     n_programs = max(1, min(T, 2 * _num_sms(x.device)))
     dx = torch.empty(B, S, H, D, dtype=x.dtype, device=x.device)
+    if 0 < T <= 32:
+        dw = torch.empty_like(w)
+        _small_bwd_kernel[(H,)](
+            dy, x, w, cos, sin, rstd, dx, dw, T, S, H, D,
+            *x.stride()[:3], *dy.stride(),
+            BT=triton.next_power_of_2(T), BDH=block_dh, num_warps=4,
+        )
+        return dx, dw
     dw_partial = torch.empty(n_programs, H, D, dtype=torch.float32, device=x.device)
     _fused_bwd_kernel[(n_programs,)](
         dy, x, w, cos, sin, rstd, dx, dw_partial, T, S, H, D,

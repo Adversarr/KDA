@@ -51,7 +51,7 @@ def sliding_tile_attention_sdpa(
     return F.scaled_dot_product_attention(q, k, v, attn_mask=sta_token_mask(tile_mask, tile_size, text_len)[None])
 
 
-COMPILE_DESCRIPTION = "dynamic STA forward/adjoint chunks; Python loops; fp32 dK/dV accumulation"
+COMPILE_DESCRIPTION = "dynamic 512-query STA forward/adjoint chunks; Python loops; fp32 dK/dV accumulation"
 
 
 def _chunk_prob(q, k, tile_mask, tile_size, queries):
@@ -94,10 +94,10 @@ class _BoundedReference(torch.autograd.Function):
         queries = torch.arange(q.shape[2], device=q.device)
         for b in range(q.shape[0]):
             for h in range(q.shape[1]):
-                for start in range(0, q.shape[2], 128):
-                    out[b:b+1, h:h+1, start:start+128] = chunk_fn(
-                        q[b:b+1, h:h+1, start:start+128], k[b:b+1, h:h+1],
-                        v[b:b+1, h:h+1], mask[h:h+1], tile_size, queries[start:start+128])
+                for start in range(0, q.shape[2], 512):
+                    out[b:b+1, h:h+1, start:start+512] = chunk_fn(
+                        q[b:b+1, h:h+1, start:start+512], k[b:b+1, h:h+1],
+                        v[b:b+1, h:h+1], mask[h:h+1], tile_size, queries[start:start+512])
         return out
 
     @staticmethod
@@ -109,12 +109,12 @@ class _BoundedReference(torch.autograd.Function):
         queries = torch.arange(q.shape[2], device=q.device)
         for b in range(q.shape[0]):
             for h in range(q.shape[1]):
-                for start in range(0, q.shape[2], 128):
+                for start in range(0, q.shape[2], 512):
                     a, c, d = ctx.adjoint_fn(
-                        q[b:b+1, h:h+1, start:start+128], k[b:b+1, h:h+1],
+                        q[b:b+1, h:h+1, start:start+512], k[b:b+1, h:h+1],
                         v[b:b+1, h:h+1], mask[h:h+1], ctx.tile_size,
-                        queries[start:start+128], do[b:b+1, h:h+1, start:start+128])
-                    dq[b:b+1, h:h+1, start:start+128] = a
+                        queries[start:start+512], do[b:b+1, h:h+1, start:start+512])
+                    dq[b:b+1, h:h+1, start:start+512] = a
                     dk[b:b+1, h:h+1] += c
                     dv[b:b+1, h:h+1] += d
         return dq, dk.to(k.dtype), dv.to(v.dtype), None, None, None, None, None

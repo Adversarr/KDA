@@ -137,6 +137,23 @@ def _bwd(ROT, DV, DXV, COPY_V: tl.constexpr, VB, VH, VS, VD, DY, X, W, POS, FREQ
     tl.store(PB + pid.to(tl.int64) * 64 + d + 48, tl.sum(db3, 0))
 
 
+@triton.jit
+def _bwd_pair(ROT, DQ, DK, DV, XQ, XK, QW, KW, QM, QI, KM, KI,
+              DXQ, DXK, DXV, PQW, PQB, PKW, PKB,
+              TOKENS, S: tl.constexpr, H: tl.constexpr, D: tl.constexpr,
+              XB, XS, XH, QB, QH, QS, QD, KB, KH, KS, KD, VB, VH, VS, VD,
+              DB, DS, DH, HEADS: tl.constexpr, BLOCK: tl.constexpr):
+    # Disjoint Q and K CTA groups share a launch; only the Q group writes dV.
+    if tl.program_id(1) == 0:
+        _bwd(ROT, DV, DXV, True, VB, VH, VS, VD, DQ, XQ, QW, ROT, ROT,
+             QM, QI, DXQ, PQW, PQB, TOKENS, S, H, D, XB, XS, XH,
+             QB, QH, QS, QD, DB, DS, DH, HEADS, BLOCK)
+    else:
+        _bwd(ROT, DV, DXV, False, VB, VH, VS, VD, DK, XK, KW, ROT, ROT,
+             KM, KI, DXK, PKW, PKB, TOKENS, S, H, D, XB, XS, XH,
+             KB, KH, KS, KD, DB, DS, DH, HEADS, BLOCK)
+
+
 def _forward(x, w, bias, positions, freq, eps, save, v=None, vo=None, rot=None):
     """Launch one program per token; share positions/trig across all heads."""
     b, tokens, heads, d = x.shape
@@ -198,8 +215,19 @@ class _QKV(torch.autograd.Function):
         dx = torch.empty_like(qkv)
         q, k, v = qkv.unbind(2)
         dxq, dxk, dxv = dx.unbind(2)
-        pqw, pqb = _backward(dq, q, qw, positions, inv_freq, qm, qi, dxq, dv, dxv, rot)
-        pkw, pkb = _backward(dk, k, kw, positions, inv_freq, km, ki, dxk, rot=rot)
+        batches, tokens, heads, d = q.shape
+        programs = max(1, min(batches * tokens, 8 * torch.cuda.get_device_properties(q.device).multi_processor_count))
+        partial = torch.empty((4, programs, d), device=q.device, dtype=torch.float32)
+        pqw, pqb, pkw, pkb = partial.unbind(0)
+        if batches * tokens:
+            _bwd_pair[(programs, 2)](
+                rot, dq, dk, dv, q, k, qw, kw, qm, qi, km, ki,
+                dxq, dxk, dxv, pqw, pqb, pkw, pkb,
+                batches * tokens, tokens, heads, d, *q.stride()[:3],
+                *dq.stride(), *dk.stride(), *dv.stride(), *dxq.stride()[:3],
+                triton.next_power_of_2(heads), triton.next_power_of_2(d), num_warps=2)
+        else:
+            partial.zero_()
         dqw, dqb, dkw, dkb = (torch.empty_like(qw) for _ in range(4))
         _reduce_parameters[(triton.cdiv(qw.numel(), 4), 4)](
             pqw, pqb, pkw, pkb, dqw, dqb, dkw, dkb, pqw.shape[0], qw.numel(),

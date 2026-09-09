@@ -6,7 +6,7 @@ only chunk math and its explicit adjoint, never thousands of loop iterations.
 import torch
 import torch.nn.functional as F
 
-COMPILE_DESCRIPTION = "dynamic forward/adjoint chunks; Python loops; fp32 dK/dV accumulation"
+COMPILE_DESCRIPTION = "dynamic 512-query forward/adjoint chunks; Python loops; fp32 dK/dV accumulation"
 
 
 def _chunk_math(q, k, v, mask, queries):
@@ -55,10 +55,10 @@ class _BoundedReference(torch.autograd.Function):
         for b in range(q.shape[0]):
             mb = mask[b:b+1] if isinstance(mask, torch.Tensor) else mask
             for h in range(0, q.shape[1], 4):
-                for start in range(0, q.shape[2], 128):
-                    out[b:b+1, h:h+4, start:start+128] = chunk_fn(
-                        q[b:b+1, h:h+4, start:start+128], k[b:b+1, h:h+4],
-                        v[b:b+1, h:h+4], mb, queries[start:start+128])
+                for start in range(0, q.shape[2], 512):
+                    out[b:b+1, h:h+4, start:start+512] = chunk_fn(
+                        q[b:b+1, h:h+4, start:start+512], k[b:b+1, h:h+4],
+                        v[b:b+1, h:h+4], mb, queries[start:start+512])
         return out
 
     @staticmethod
@@ -71,12 +71,12 @@ class _BoundedReference(torch.autograd.Function):
         for b in range(q.shape[0]):
             mb = ctx.mask[b:b+1] if isinstance(ctx.mask, torch.Tensor) else ctx.mask
             for h in range(0, q.shape[1], 4):
-                for start in range(0, q.shape[2], 128):
+                for start in range(0, q.shape[2], 512):
                     a, c, d = ctx.adjoint_fn(
-                        q[b:b+1, h:h+4, start:start+128], k[b:b+1, h:h+4],
-                        v[b:b+1, h:h+4], mb, queries[start:start+128],
-                        do[b:b+1, h:h+4, start:start+128])
-                    dq[b:b+1, h:h+4, start:start+128] = a
+                        q[b:b+1, h:h+4, start:start+512], k[b:b+1, h:h+4],
+                        v[b:b+1, h:h+4], mb, queries[start:start+512],
+                        do[b:b+1, h:h+4, start:start+512])
+                    dq[b:b+1, h:h+4, start:start+512] = a
                     dk[b:b+1, h:h+4] += c
                     dv[b:b+1, h:h+4] += d
         return dq, dk.to(k.dtype), dv.to(v.dtype), None, None, None

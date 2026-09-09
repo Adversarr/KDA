@@ -1,9 +1,9 @@
 # Golden: per-head RMSNorm + interleaved RoPE + permute (`qk_prep`)
 
-Current status: **incomplete**. All four current-source numerical workloads and independent
-adjoints pass. The full run passes, but both source-matched small-row repeats fail backward
-baseline parity at about 0.724x. The full-run/repeat disagreement remains unresolved; no final
-pass is claimed.
+Current status: **pass**. The 2026-09-08 full A800 run, two independent small-row repeats,
+and small/strided adjoints pass. H20 small-row adjoints also pass. The short-sequence backward
+now assigns a complete head to each program and writes its final weight gradient directly,
+removing partial-buffer allocation and separate reduction launches for up to 32 tokens.
 
 Hand-written target for `qk_prep` in `user_repo/minilm/attention.py` (Qwen3-style q/k
 preparation in a grouped-query attention block), with recorded A800 reference measurements.
@@ -24,7 +24,7 @@ either input.
 
 The forward is one program per `(b, s, block of heads)` (`BLOCK_H` capped so a tile is about 2K
 elements: 16 heads of 128 for the user's shape), `rstd (B, S, H)` saved in fp32 only when a
-backward can follow. The backward is a fixed grid of `2 x SMs` programs striding over tokens,
+backward can follow. For longer sequences, the backward is a fixed grid of `2 x SMs` programs striding over tokens,
 `dx` written per token and one fp32 `dw` partial per program reduced by PyTorch on the GPU.
 
 Contract (v1.1 lint rules): `x`, `dy` strided through; no `.contiguous()`, no `.reshape`; int64
@@ -44,9 +44,9 @@ gradients. Copy roof is the measured `y.copy_(x)` bandwidth.
 
 | Phase | Golden | Eager | Compiled | SoL |
 |---|---:|---:|---:|---:|
-| forward | 0.2177 ms | 6.2486 ms | 0.6683 ms | 92.3% |
-| inference | 0.2125 ms | 6.2505 ms | 0.9240 ms | 93.6% |
-| backward | 0.3547 ms | 10.1805 ms | 1.2179 ms | 83.8% |
+| forward | 0.2182 ms | 6.2524 ms | 0.6683 ms | 92.0% |
+| inference | 0.2130 ms | 6.2511 ms | 0.9240 ms | 93.5% |
+| backward | 0.3531 ms | 10.1797 ms | 1.2162 ms | 84.1% |
 
 `torch.compile` is unusually weak here: Inductor keeps the interleaved `stack/flatten` and the
 permuted `.contiguous()` as separate passes over the 168 MB tensors instead of fusing them into
@@ -84,9 +84,9 @@ independent acceptance audit. Use a distinct output filename for scoped `--workl
 
 ## Current-source repeat audit
 
-The full run measures small-row backward at 0.016912 ms versus 0.016112 ms compiled (0.953x,
-pass). The two repeats measure 0.019888/0.019872 ms versus 0.014399/0.014400 ms compiled
-(0.724/0.725x). Their gaps exceed the 1-us latency allowance, so the small copy roof does not
-waive baseline parity. All baseline numerical checks pass. Measurement and published source hashes, full rows, raw
-rounds and adjoints are retained in `golden.json`; historical design comparisons above are not
-repeat evidence.
+The repaired full run measures small-row backward at 0.008960 ms versus 0.014672 ms
+compiled (1.638x). Both independent repeats pass at about 1.63x compiled. All four full-run
+numerical workloads and eligible baselines pass, as do independent small and strided adjoints.
+The short path counts final gradients but no partial-buffer traffic in its roof. The original
+conflicting captures remain under `historical_capture` in `golden.json`; the new top-level
+record, repeats and adjoints identify the repaired source by hash.

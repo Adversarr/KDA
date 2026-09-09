@@ -24,8 +24,9 @@ output path.
 `--bench` verifies the kernel and each comparison baseline before timing. It uses profiler
 device times, three warmup iterations and ten measured iterations in each of three interleaved
 rounds. The reported time is the minimum round median. Eager, compiled and applicable attention
-baselines must preserve the numerical contract. Acceptance compares against the fastest eligible
-baseline, including SDPA when available. Raw product speedups compare eager/compiled only;
+baselines must preserve the numerical contract. Except for the GEMM policy below, acceptance
+compares against the fastest eligible baseline, including SDPA when available.
+Raw product speedups compare eager/compiled only;
 attention summaries also record the audit that includes SDPA.
 
 Generated reports belong outside `golden/`. Preserve failed captures and diagnostic repeats;
@@ -43,16 +44,23 @@ nonfunctional changes. Executable function bodies and JIT source remain unchange
 
 The [product roof
 rules](../kda/kda-skills/kda-kernel-implement/reference/common/speed-of-light.md) and runtime
-decisions are authoritative:
+accounting remains authoritative. The following example-suite acceptance policy was explicitly
+authorized on 2026-09-08; the product runtime's default 70% threshold is unchanged:
 
-- Require achievable `roof_ms / kernel_ms >= 0.70` where SoL is gated.
-- Require `best_baseline_ms / kernel_ms >= 0.95`.
+- Target achievable `roof_ms / kernel_ms >= 0.70`; this example suite accepts the explicitly
+approved 0.68–0.70 margin, with the measured ratio and reason retained.
+- GEMM cases (declaring `gemm_shapes`) require an eligible, numerically validated compiled
+baseline and `compiled_ms / kernel_ms >= 0.95`. Their SoL is diagnostic, not a pass/fail gate.
+- Other cases require `best_baseline_ms / kernel_ms >= 0.95`.
 - When the achievable roof is below 10 microseconds, report SoL without gating it
 and retain the existing 1-microsecond absolute baseline parity allowance.
 - Gate training forward, backward and inference as applicable. Recompute numerics
 always count; recompute performance gates only when recompute is the default.
-- Repeat near-gate failures twice as prescribed by the runtime. Conflicting results
-remain incomplete; selecting the favorable capture is not acceptance.
+- The user subsequently authorized accepting observed near-gate results with the
+measured ratio and reason recorded, without further tuning/repeats. Raw gate results
+remain preserved. Larger deviations require explicit capture-specific acceptance;
+the two documented H20 segmented backward rows have that authorization. Numerical
+failures and missing measurements are never waived.
 
 Numerically correct kernels that miss a performance gate remain `tune`. Missing coverage,
 unavailable calibration and unresolved measurement disagreement remain `incomplete`. Numerical
@@ -117,11 +125,31 @@ directly in `benchmark_cases.py`. Historical records preserve the scope used whe
 
 ## Profiler limitations
 
+For large chunked references, `KDA_PROFILER_ACTIVITIES=cuda` selects one complete
+call per CUDA-only trace. This avoids materializing huge CPU operator traces; it
+still sums CUPTI device durations, excludes host launch overhead, and flushes L2
+before every measured call. Candidate, baselines and calibration use the same mode.
+The report records `profiler_activities`; default `cpu_cuda` retains CPU-span
+matching. CUDA-only collection rejects missing/invalid durations or inconsistent
+event counts across identical calls. It does not shorten a workload or infer
+missing events. Use complete same-mode captures when comparing performance.
+
+The profiler defaults `TEARDOWN_CUPTI=1` unless explicitly overridden, using Kineto's
+CUPTI teardown/reinitialization path between traces. This addresses the observed long-process
+loss of early GPU records after compilation/idle periods. The selected environment value is
+recorded in new example reports. Scheduled warmup and longer dummy loops alone did not resolve
+all failures; their failed captures remain in the audit evidence.
+
+Each trace also starts with unmeasured invocations (at least three, or the configured warmup
+count when larger) before the first measured cache flush and CPU marker. The requested
+measured iteration count is unchanged. After collection, a short wait and an unmeasured
+CUDA synchronization let Kineto complete its asynchronous finalize callback before shutdown.
+
 The runtime reads raw Kineto GPU events and CPU iteration annotations, excluding synthetic GPU
-annotations and cache flushes. Every iteration must have finite, positive device time. One retry
-is allowed for incomplete collection; reports retain both attempts in `measurement_diagnostics`.
-Kernel exceptions are not retried and explicit profiler measurements never fall back to
-CUDA-event timing.
+annotations and cache flushes. Every iteration must have finite, positive device time and an
+equal device-event count for the identical callable/input. One retry is allowed for incomplete
+collection; reports retain both attempts in `measurement_diagnostics`. Kernel exceptions are
+not retried and explicit profiler measurements never fall back to CUDA-event timing.
 
 Large bounded-memory references can still produce expensive traces or lose GPU events.
 Interrupted captures and partial samples cannot establish performance correctness. Each affected

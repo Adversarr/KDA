@@ -83,7 +83,7 @@ def roof(phase, args, kwargs):
         nrow = max(1, min((M + 31) // 32, 8 * sms // ncol))
         # dY, Z read; dZ write and read twice; X/W read; dX/dW/db writes;
         # fp32 bias partial write/read, and fp32 parameter-gradient conversion.
-        byte_count = 10 * M * N + 4 * M * K + 10 * N * K + 8 * nrow * N + 16 * N
+        byte_count = 10 * M * N + 4 * M * K + (6 if M <= 8192 else 10) * N * K + 8 * nrow * N + 16 * N
         flops = 4 * M * N * K
         if kwargs.get("recompute", False):
             byte_count += 6 * N + 2 * (M * K + N * K + N + M * N)

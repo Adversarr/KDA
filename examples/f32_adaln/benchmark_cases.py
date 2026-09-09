@@ -107,7 +107,7 @@ def roof(phase, args, kwargs):
     aux = 8 * r if phase != "infer" else 0
     (b, tokens, _) = x.shape
     silu = kwargs.get("silu", False)
-    program_scale = 4 if silu and d == 1152 else 2
+    program_scale = 12 if silu and d == 1152 else 2
     p = max(1, min((tokens + 3) // 4, max(1, program_scale * sms // max(1, b))))
     if tokens <= 32 and d <= 256:
         p = 0  # One program writes final parameter gradients directly.

@@ -34,6 +34,25 @@ def _make(B, H, S, D, maskarg, strided=False):
     return (*args, valid), {}
 
 
+def _probability_cancellation():
+    """Exercise the adopted Flash-style probability rounding boundary.
+
+    The strict FP32-probability reference returned -0.03125. BF16 Flash and
+    the current eager probability cast return zero for this case. Keep the
+    case to expose the precision convention, not to enforce the retired one.
+    """
+    q = torch.zeros((1, 2, 129, 64), device="cuda", dtype=torch.bfloat16)
+    q[..., 0] = 1
+    k = torch.zeros_like(q)
+    k[:, :, 1, 0] = 0.015625
+    v = torch.zeros_like(q)
+    v[:, :, 0, :] = 32
+    v[:, :, 1, :] = -32
+    valid = torch.zeros((1, 129), device="cuda", dtype=torch.bool)
+    valid[:, :2] = True
+    return (q.requires_grad_(), k.requires_grad_(), v.requires_grad_(), valid), {}
+
+
 def cases():
     specs = [
         ("frame", 4, 16, 1374, 64, 0.15, False),
@@ -61,6 +80,15 @@ def cases():
             return args, {**kwargs, "recompute": True}
         rows.append(dict(name=spec[0] + "_recompute", required=spec[0] in normal, benchmark=False,
                          make=make_recompute, grad_reductions=[1, 1, 1]))
+    rows.append(dict(name="probability_cancellation", required=True, benchmark=False,
+                     make=_probability_cancellation, grad_reductions=[1, 1, 1]))
+
+    def cancellation_recompute():
+        args, kwargs = _probability_cancellation()
+        return args, {**kwargs, "recompute": True}
+
+    rows.append(dict(name="probability_cancellation_recompute", required=True, benchmark=False,
+                     make=cancellation_recompute, grad_reductions=[1, 1, 1]))
     return rows
 
 
@@ -77,15 +105,24 @@ def roof(phase, args, kwargs):
     B, H, S, D = q.shape
     es = q.element_size()
     pairs = attention_work(phase, args, kwargs)["pairs"]
-    # Required reads/writes; attention GEMMs dominate, score planes are not materialized.
+    rq = B * H * S
+    rk = H * int(mask.sum().item())
+    # Scan mask/block totals, then gather valid KV entirely on the GPU.
+    # Prefix/block-start lookups are read by each head's pack/scatter pass.
+    blocks = (S + 1023) // 1024
+    scan = 5 * B * S + 16 * B * blocks + 16 * B
+    indices = 8 * rq
     if phase == "bwd":
-        byte_count, flops = B * H * S * (13 * D * es + 20) + 2 * B * S, pairs * 10 * D
+        byte_count = (7 * rq + 6 * rk) * D * es + 20 * rq
+        byte_count += (2 * rk + 2 * rq) * D * es + indices + 8 * B
+        flops = pairs * 10 * D
         if kwargs.get("recompute", False):
-            byte_count += B * H * S * (4 * D * es + 4) + B * S
+            byte_count += (2 * rq + 2 * rk) * D * es + 4 * rq + 8 * B
             flops += pairs * 4 * D
         return byte_count, flops
-    aux = 4 * B * H * S if phase == "fwd" and not kwargs.get("recompute", False) else 0
-    return (4 * B * H * S * D * es + aux + B * S, pairs * 4 * D)
+    aux = 4 * rq if phase == "fwd" and not kwargs.get("recompute", False) else 0
+    return ((2 * rq + 6 * rk) * D * es + aux + scan + indices, pairs * 4 * D)
+
 
 
 __all__ = ["kernel_fn", "reference_fn", "ROOF", "cases", "roof", "baseline_fn", "compile_fn"]

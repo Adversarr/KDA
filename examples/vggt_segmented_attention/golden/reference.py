@@ -89,6 +89,7 @@ class _BoundedReference(torch.autograd.Function):
         return dq, dk.to(k.dtype), dv.to(v.dtype), None, None, None
 
 
+
 class _FullReference(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, mask):
@@ -103,28 +104,35 @@ class _FullReference(torch.autograd.Function):
         return dq, dk.to(k.dtype), dv.to(v.dtype), None
 
 
-def padded_attention(q, k, v, key_valid):
+def _mask(q, lengths, tokens_per_view):
+    mask = torch.zeros((q.shape[0], q.shape[2]), device=q.device, dtype=torch.bool)
+    for b, row in enumerate(lengths):
+        for view, n in enumerate(row):
+            mask[b, view*tokens_per_view:view*tokens_per_view+n] = True
+        if not sum(row) and q.shape[2]:
+            mask[b, 0] = True
+    return mask
+
+
+def segmented_attention(q, k, v, lengths, tokens_per_view, *, recompute=False):
+    if q.shape[0] == 0 or q.shape[2] == 0:
+        return q + k + v
+    mask = _mask(q, lengths, tokens_per_view)
     if q.shape[2] > 8192:
-        return _BoundedReference.apply(q, k, v, key_valid, _chunk_math, _chunk_adjoint)
-    return _FullReference.apply(q, k, v, key_valid)
+        return _BoundedReference.apply(q, k, v, mask, _chunk_math, _chunk_adjoint)
+    return _FullReference.apply(q, k, v, mask)
 
 
 def compiled_reference():
-    """Build genuinely compiled chunk functions with bounded graph and score sizes.
-
-    Called once per workload. Baseline validation warms both phases before timing;
-    compiler failures propagate to the runner's ordinary baseline exclusion.
-    """
     forward = torch.compile(_chunk_math, fullgraph=True, dynamic=True,
                             mode="max-autotune-no-cudagraphs")
     adjoint = torch.compile(_chunk_adjoint, fullgraph=True, dynamic=True,
                             mode="max-autotune-no-cudagraphs")
 
-    def run(q, k, v, key_valid, *, recompute=False):
-        return _BoundedReference.apply(q, k, v, key_valid, forward, adjoint)
-
+    def run(q, k, v, lengths, tokens_per_view, *, recompute=False):
+        return _BoundedReference.apply(q, k, v, _mask(q, lengths, tokens_per_view), forward, adjoint)
     return run
 
 
-def sdpa(q, k, v, key_valid):
-    return F.scaled_dot_product_attention(q, k, v, attn_mask=key_valid[:, None, None, :])
+def sdpa(q, k, v, lengths, tokens_per_view, *, recompute=False):
+    return F.scaled_dot_product_attention(q, k, v, attn_mask=_mask(q, lengths, tokens_per_view)[:, None, None, :])

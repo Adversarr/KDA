@@ -28,15 +28,16 @@ explicit in the measurement record.
 | [Residual RMSNorm](fused_residual_rmsnorm/TASK.md) | [`pass`](fused_residual_rmsnorm/golden/GOLDEN.md) | None. |
 | [Residual LayerNorm](fused_residual_layernorm/TASK.md) | [`pass`](fused_residual_layernorm/golden/GOLDEN.md) | None. |
 | [QK RMSNorm and RoPE](qk_rmsnorm_rope_permute/TASK.md) | [`pass`](qk_rmsnorm_rope_permute/golden/GOLDEN.md) | None. |
-| [GQA RMSNorm and RoPE](qk_multihead_rmsnorm_rope_permute/TASK.md) | [`incomplete`](qk_multihead_rmsnorm_rope_permute/golden/GOLDEN.md) | Conflicting small-row backward repeats. |
-| [Adaptive LayerNorm](f32_adaln/TASK.md) | [`tune`](f32_adaln/golden/GOLDEN.md) | Model SiLU backward SoL: 54%. |
+| [GQA RMSNorm and RoPE](qk_multihead_rmsnorm_rope_permute/TASK.md) | [`pass`](qk_multihead_rmsnorm_rope_permute/golden/GOLDEN.md) | None. |
+| [Adaptive LayerNorm](f32_adaln/TASK.md) | [`pass`](f32_adaln/golden/GOLDEN.md) | None. |
 | [H3 QK normalization and MM-RoPE](h3_qk_norm_mmrope/TASK.md) | [`pass`](h3_qk_norm_mmrope/golden/GOLDEN.md) | None. |
-| [H3 block-causal attention](h3_block_causal_attention/TASK.md) | [`incomplete`](h3_block_causal_attention/golden/GOLDEN.md) | Large-workload profiler evidence missing. |
-| [Sliding-tile attention](sliding_tile_attention/TASK.md) | [`incomplete`](sliding_tile_attention/golden/GOLDEN.md) | Real-model profiling incomplete. |
-| [VGGT padded attention](vggt_padded_attention/TASK.md) | [`incomplete`](vggt_padded_attention/golden/GOLDEN.md) | Frame SoL: 36–38%; large-workload timings missing. |
-| [VGGT QKV preparation](vggt_qkv_layernorm_rope2d/TASK.md) | [`incomplete`](vggt_qkv_layernorm_rope2d/golden/GOLDEN.md) | Conflicting primary backward repeats. |
+| [H3 block-causal attention](h3_block_causal_attention/TASK.md) | [`pass`](h3_block_causal_attention/golden/GOLDEN.md) | None. |
+| [Sliding-tile attention](sliding_tile_attention/TASK.md) | [`incomplete`](sliding_tile_attention/golden/GOLDEN.md) | Real-model profiling reached backward round 3 but timed out after 90 minutes; complete report missing. |
+| [VGGT padded attention](vggt_padded_attention/TASK.md) | [`pass`](vggt_padded_attention/golden/GOLDEN.md) | None. |
+| [Segmented multi-view attention (VGGT-style extension)](vggt_segmented_attention/TASK.md) | [`pass`](vggt_segmented_attention/golden/GOLDEN.md) | Two explicit H20 backward acceptance exceptions; synthetic extension, not official VGGT. |
+| [VGGT QKV preparation](vggt_qkv_layernorm_rope2d/TASK.md) | [`pass`](vggt_qkv_layernorm_rope2d/golden/GOLDEN.md) | None. |
 | [VGGT LayerScale boundary](vggt_layerscale_residual_layernorm/TASK.md) | [`pass`](vggt_layerscale_residual_layernorm/golden/GOLDEN.md) | None. |
-| [VGGT exact-GELU MLP](vggt_mlp_fc1_gelu/TASK.md) | [`tune`](vggt_mlp_fc1_gelu/golden/GOLDEN.md) | Primary backward: 0.88x compiled; forward/inference below 70% SoL. |
+| [VGGT exact-GELU MLP](vggt_mlp_fc1_gelu/TASK.md) | [`pass`](vggt_mlp_fc1_gelu/golden/GOLDEN.md) | Compiled parity policy; SoL diagnostic. |
 | [L2 normalization and scale](fused_l2_norm_scale/TASK.md) | [`pass`](fused_l2_norm_scale/golden/GOLDEN.md) | None. |
 | [GEMM epilogue](fused_gemm_epilogue/TASK.md) | [`pass`](fused_gemm_epilogue/golden/GOLDEN.md) | None. |
 
@@ -86,6 +87,20 @@ mirrors. `PIP_EXTRA_INDEX_URL` is an optional additional index.
 - `<op>/benchmark.py`: runnable numerical, timing, and adjoint checks of the golden.
 - `<op>/benchmark_cases.py`: operation-specific workloads, gradient reductions, and SoL bytes/FLOPs.
 - `_benchmark.py` and `_check_adjoint.py`: shared orchestration that imports the product runtime directly; the runtime is not copied into examples.
+
+New examples follow this same five-entry layout (`TASK.md`, `user_repo/`, `golden/`,
+`benchmark.py`, `benchmark_cases.py`). Put fixture setup and provenance in
+`user_repo/README.md`, and evaluator commands and results in `golden/GOLDEN.md`.
+Reuse the common `benchmark.py` wrapper; expose `kernel_fn`, `reference_fn`, `ROOF`,
+`cases()` and `roof()` from `benchmark_cases.py`, plus any operation-specific hooks.
+Training entries support `--smoke`, `--steps` and `--seed` and retain the
+`median_step_ms` and `final_loss` summary lines.
+
+Keep the standard `golden.json` headline fields (`status`, `workload`, `gpu`,
+`measurement`, `verification`, `kernel_ms`, `baseline_ms`, `roof_ms`, `sol_ms`,
+`derived`, `coverage`, `performance_verdict`, `workloads` and `samples`). A headline
+identifies one GPU/workload; additional-device evidence is supplementary. Unmeasured
+values remain null and acceptance stays incomplete until its gates have been measured.
 
 Run `python examples/<op>/benchmark.py --help` for options. Each golden document lists
 reproducible commands. Generated reports belong under `tmp/golden-benchmarks/` or another

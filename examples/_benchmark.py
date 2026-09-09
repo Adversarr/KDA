@@ -8,14 +8,78 @@ verdict still requires the independent source/coverage audit before acceptance.
 from __future__ import annotations
 
 import argparse
+import copy
 import gc
 import hashlib
 from datetime import datetime, timezone
 import json
+import math
+import os
 import traceback
 import importlib.util
 import sys
 from pathlib import Path
+
+
+def acceptance_policy(gemm):
+    """Example-suite policy; the product runtime retains its strict defaults."""
+    return {
+        "kind": "gemm_compiled_parity" if gemm else "sol_with_margin",
+        "sol_target": 0.70,
+        "sol_threshold": None if gemm else 0.68,
+        "baseline_min_speedup": 0.95,
+        "basis": "2026-09-08 user-authorized example acceptance: 68–70% SoL margin; GEMM judged by eligible compiled parity.",
+    }
+
+
+def acceptance_verdict(results, coverage, policy):
+    """Keep numerical/coverage gates; apply the documented example performance policy."""
+    gemm = policy["kind"] == "gemm_compiled_parity"
+    # The product report knows eager/compiled only. Adjudicate on copies so
+    # eligible SDPA participates without rewriting any recorded measurements.
+    judged = [copy.copy(result) for result in results]
+    for result in judged:
+        result.time_ms = dict(result.time_ms)
+        if gemm:
+            result.time_ms = {
+                name: value for name, value in result.time_ms.items()
+                if not name.startswith("eager_")
+            }
+        else:
+            for phase in ("fwd", "infer", "bwd"):
+                sdpa = result.time_ms.get(f"sdpa_{phase}")
+                if sdpa is not None and math.isfinite(sdpa) and sdpa > 0:
+                    eager = result.time_ms.get(f"eager_{phase}")
+                    result.time_ms[f"eager_{phase}"] = min(sdpa, eager) if eager else sdpa
+    verdict, reasons = report.verdict(
+        judged, coverage=coverage,
+        sol_threshold=0.0 if gemm else policy["sol_threshold"],
+    )
+    for result in results:
+        if not result.required:
+            continue
+        required = coverage["required"].get(result.name, {})
+        for phase in required.get("phases", []):
+            if f"kernel_{phase}" not in required.get("timings", []):
+                continue
+            if gemm:
+                compiled = result.time_ms.get(f"compiled_{phase}")
+                kernel = result.time_ms.get(f"kernel_{phase}")
+                if compiled is None or not math.isfinite(compiled) or compiled <= 0:
+                    reasons.append(f"{result.name}/{phase}: eligible compiled baseline required by GEMM policy")
+                    if verdict != "fail":
+                        verdict = "incomplete"
+                elif kernel and compiled / kernel < policy["baseline_min_speedup"]:
+                    reasons.append(f"{result.name}/{phase}: below required compiled parity (0.95x)")
+                    if verdict == "pass":
+                        verdict = "tune"
+            else:
+                efficiency = result.sol_eff(phase)
+                if efficiency is not None and 0.68 <= efficiency < 0.70:
+                    reasons.append(f"{result.name}/{phase}: SOL {efficiency:.4f} accepted within the documented 68–70% margin")
+    if gemm:
+        reasons.append("GEMM policy: SOL is diagnostic; eligible compiled baseline parity >=0.95x is required")
+    return verdict, reasons
 
 
 def outputs(value):
@@ -368,8 +432,10 @@ def main(default_golden: Path | None = None, argv=None):
     info = gpu_info.get_gpu_info()
     results = []
 
+    policy = acceptance_policy(callable(getattr(cases, "gemm_shapes", None)))
+
     def save():
-        verdict, reasons = report.verdict(results, coverage=coverage)
+        verdict, reasons = acceptance_verdict(results, coverage, policy)
         record = {
             "op": root.parent.name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -380,8 +446,11 @@ def main(default_golden: Path | None = None, argv=None):
                 "bench_method": "profiler",
                 "gpu": info.as_dict(),
                 "torch": torch.__version__,
+                "profiler_cupti_teardown": os.environ.get("TEARDOWN_CUPTI"),
+                "profiler_activities": os.environ.get("KDA_PROFILER_ACTIVITIES", "cpu_cuda"),
             },
             "coverage": coverage,
+            "acceptance_policy": policy,
             "source_hashes": golden_hashes,
             "validation_hashes": validation_hashes,
             "verdict": verdict,
@@ -402,7 +471,13 @@ def main(default_golden: Path | None = None, argv=None):
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(record, indent=2) + "\n")
         md_path.parent.mkdir(parents=True, exist_ok=True)
-        md_path.write_text(report.render_markdown(record))
+        md_path.write_text(
+            report.render_markdown(record)
+            + "\n## Example acceptance policy\n\n"
+            + ("GEMM: eligible compiled parity >=0.95x; SoL remains diagnostic.\n"
+               if policy["kind"] == "gemm_compiled_parity"
+               else "SoL target 70%, accepted floor 68%; baseline parity >=0.95x.\n")
+        )
         return verdict, reasons
 
     for row in rows:

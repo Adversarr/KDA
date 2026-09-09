@@ -14,8 +14,9 @@ AdaLN output boundary; its backward also rounds the activation adjoint to bf16 b
 normalization adjoint.
 
 The 1152-wide model forward splits into 1024+128 channels, avoiding padding arithmetic to 2048
-lanes. Plain backward uses two-row tiles; model SiLU backward uses one-row tiles, two warps and
-four program waves distributed across batches. Scale/shift partials share a final reduction
+lanes. Plain backward uses two-row tiles; model SiLU backward also splits channels into 1024+128,
+uses four warps, and distributes twelve program waves across batches. This removes masked
+SiLU arithmetic and improves parallelism without changing the bf16 adjoint boundary. Scale/shift partials share a final reduction
 launch. Small SiLU inputs use token blocks with disjoint final modulation-gradient columns.
 
 ## Contract
@@ -36,16 +37,19 @@ promise elsewhere.
 
 | Phase | Golden | Eager | Compiled | SoL |
 |---|---:|---:|---:|---:|
-| forward (training) | 0.19579 ms | 3.34382 ms | 0.32934 ms | 89.8% |
-| forward (inference) | 0.19498 ms | 3.34322 ms | 0.27750 ms | 90.2% |
-| backward | 0.37453 ms | 6.76014 ms | 0.72392 ms | 70.5% |
+| forward (training) | 0.19649 ms | 3.33733 ms | 0.32928 ms | 89.5% |
+| forward (inference) | 0.19493 ms | 3.33529 ms | 0.27757 ms | 90.0% |
+| backward | 0.37411 ms | 6.75783 ms | 0.72678 ms | 70.5% |
 
-Measured full-workload verdict: **tune**. model_silu/bwd: SOL efficiency 0.54 < 0.7
+Measured full-workload verdict on 2026-09-08: **pass**. All seven numerical workloads,
+eligible baselines, and applicable phase gates pass. Model SiLU backward is 0.36779 ms,
+75.0% of the measured achievable roof, and 3.227x compiled. Two independent model-SiLU
+repeats retain 74.7% SoL and pass every phase. Independent model-sized and small-input
+adjoints pass, including broadcast upstream gradients.
 
 Full output/gradient checks, phase times, measured copy roofs, separate datasheet bounds,
-baseline ratios, round samples and available repeats are recorded in `golden.json`.
-Source-matched full numerical checks, eligible baselines, independent adjoints and repeat
-evidence audited. Model SiLU backward misses the SoL gate; status remains tune.
+baseline ratios, round samples and source-matched repeats are recorded in `golden.json`.
+The older tuning capture is preserved under `historical_capture`.
 
 ## Traffic and arithmetic
 
@@ -55,7 +59,7 @@ traffic. Partial buffers count both their write and subsequent reduction read; f
 parameter-gradient stores are included. Transcendental instruction cost is not represented by an
 invented FLOP multiplier.
 
-Let `R=B*N`, `C=R*D`, and `P=min(ceil(N/4),max(1,floor(A*SMs/B)))`, with `A=4` for 1152-wide
+Let `R=B*N`, `C=R*D`, and `P=min(ceil(N/4),max(1,floor(A*SMs/B)))`, with `A=12` for 1152-wide
 SiLU and `A=2` otherwise. Direct small-input reductions use `P=0`. Forward bytes: `4*C + 8*B*D +
 8*R`; inference omits auxiliaries. Backward bytes: `6*C + 8*R + 12*B*D + 16*B*P*D`; SiLU also
 reads the shift (`4*B*D`). Forward arithmetic is `8*C+3*R` (SiLU: `10*C+3*R`); backward is

@@ -10,7 +10,8 @@ through 37. The bf16 normalization boundary is preserved.
 The Q forward also copies V into head-major storage and, during training, saves 64 fp32 rotary
 coefficients per token for both adjoints. Backward processes four 16-channel quarters, reuses
 the saved coefficients and writes the V adjoint directly into the interleaved projection
-gradient. Eight program waves and two warps improve parallelism. One final reduction is
+gradient. Q and K use disjoint CTA groups in one backward launch; only the Q group writes the V
+adjoint. Eight program waves per group and two warps improve parallelism. One final reduction is
 parallelized across both parameter kind and channel groups.
 
 ## Contract
@@ -31,18 +32,20 @@ promise elsewhere.
 
 | Phase | Golden | Eager | Compiled | SoL |
 |---|---:|---:|---:|---:|
-| forward (training) | 0.05834 ms | 1.15432 ms | 0.32219 ms | 83.5% |
-| forward (inference) | 0.05368 ms | 1.15502 ms | 0.18490 ms | 87.1% |
-| backward | 0.08843 ms | 1.63864 ms | 0.26917 ms | 72.1% |
+| forward (training) | 0.05902 ms | 1.18606 ms | 0.33350 ms | 82.7% |
+| forward (inference) | 0.05394 ms | 1.18726 ms | 0.18670 ms | 87.4% |
+| backward | 0.07947 ms | 1.67587 ms | 0.23313 ms | 79.6% |
 
-Measured status: **incomplete**. The full run passes, but primary backward drops from 72.1% SoL
-to 69.9% and 69.7% in the two diagnostic repeats. Both frame-shape repeats pass. The
-disagreement remains unresolved.
+Measured status on 2026-09-08: **pass**. All five full-run numerical workloads and
+eligible baselines pass. Two primary repeats retain 80.9% backward SoL; frame repeats retain
+81.8% and 76.9%. Every applicable phase passes. Independent small and strided adjoints pass;
+H20 also passes all five numerical workloads.
 
 Full output/gradient checks, phase times, measured copy roofs, separate datasheet bounds,
-baseline ratios, round samples and available repeats are recorded in `golden.json`. Source
-hashes, numerical checks, baseline eligibility and repeat provenance audited. Primary backward
-repeat disagreement remains unresolved; acceptance is incomplete.
+baseline ratios, raw rounds and source-matched repeats are recorded in `golden.json`.
+The older conflicting captures remain under `historical_capture`. A first repaired-source run
+lost its first copy-calibration GPU event in both profiler attempts. The collector now primes
+CUDA activity before the measured markers; the new complete run and repeats use that collector.
 
 ## Traffic and arithmetic
 

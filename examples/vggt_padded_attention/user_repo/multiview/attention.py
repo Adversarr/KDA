@@ -78,22 +78,59 @@ def key_valid_from_token_valid(valid: torch.Tensor) -> torch.Tensor:
     return key_valid
 
 
+def _float_product(a, b):
+    """Matrix products with low-precision inputs and an fp32 output/accumulator."""
+    shape = (*a.shape[:-2], a.shape[-2], b.shape[-1])
+    left = a.reshape(-1, a.shape[-2], a.shape[-1])
+    right = b.reshape(-1, b.shape[-2], b.shape[-1])
+    if a.dtype == torch.float32:
+        return torch.bmm(left, right).reshape(shape)
+    return torch.bmm(left, right, out_dtype=torch.float32).reshape(shape)
+
+
+class _FlashPrecisionAttention(torch.autograd.Function):
+    """Eager matrix math with FlashAttention's mixed-precision adjoint."""
+    @staticmethod
+    def forward(ctx, q, k, v, mask):
+        with torch.autocast(q.device.type, enabled=False):
+            scores = (_float_product(q, k.transpose(-2, -1))) * q.shape[-1]**-0.5
+            if mask is not None:
+                scores = scores.masked_fill(~mask[:, None, None, :], float("-inf"))
+            p = scores.softmax(-1)
+            out = (_float_product(p.to(v.dtype), v)).to(v.dtype)
+        ctx.save_for_backward(q, k, v, out)
+        ctx.mask = mask
+        return out
+
+    @staticmethod
+    def backward(ctx, upstream):
+        q, k, v, out = ctx.saved_tensors
+        with torch.autocast(q.device.type, enabled=False):
+            scale = q.shape[-1]**-0.5
+            do = upstream.float()
+            scores = (_float_product(q, k.transpose(-2, -1))) * scale
+            if ctx.mask is not None:
+                scores = scores.masked_fill(~ctx.mask[:, None, None, :], float("-inf"))
+            p = scores.softmax(-1)
+            dp = _float_product(upstream, v.transpose(-2, -1))
+            delta = (out.float() * do).sum(-1, keepdim=True)
+            ds = (p * (dp - delta)).to(q.dtype)
+            dq = ((_float_product(ds, k)) * scale).to(q.dtype)
+            dk = ((_float_product(ds.transpose(-2, -1), q)) * scale).to(k.dtype)
+            dv = (_float_product(p.to(v.dtype).transpose(-2, -1), upstream)).to(v.dtype)
+        return dq, dk, dv, None
+
+
 def padded_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, key_valid: torch.Tensor) -> torch.Tensor:
     """``q, k, v: (B, H, N, d)``, ``key_valid: (B, N)`` bool (True = this key may be attended) -> ``(B, H, N, d)``.
 
-    Dense, non-causal. Logits, softmax and the PV accumulation are explicit fp32 (autocast is
-    disabled inside, exactly as the model's reference path does it); the result is cast back to
-    v's dtype. Every query row attends to the same key set of its batch entry, so the mask is a
+    Dense, non-causal. Logits, softmax and PV accumulation are fp32 with autocast
+    disabled. Probabilities round to v's dtype before PV, following the FlashAttention
+    mixed-precision convention; the result returns to v's dtype. Every query row attends to the same key set of its batch entry, so the mask is a
     function of ``key_valid`` alone and is never stored as an ``(N, N)`` plane. The ``(B, H, N, N)``
     fp32 logits are what make this the memory and time bottleneck of the global block.
     """
-    d = q.shape[-1]
-    with torch.autocast(device_type=q.device.type, enabled=False):
-        logits = torch.matmul(q.float(), k.float().transpose(-2, -1)) * (d**-0.5)
-        logits = logits.masked_fill(~key_valid[:, None, None, :], float("-inf"))
-        prob = torch.softmax(logits, dim=-1)
-        prob = torch.nan_to_num(prob, nan=0.0, posinf=0.0, neginf=0.0)
-        return torch.matmul(prob, v.float()).to(v.dtype)
+    return _FlashPrecisionAttention.apply(q, k, v, key_valid)
 
 
 def sdpa_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, key_valid: torch.Tensor) -> torch.Tensor:

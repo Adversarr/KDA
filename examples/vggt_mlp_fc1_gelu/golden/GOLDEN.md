@@ -3,9 +3,9 @@
 Hand-written target for `mlp_fc1_gelu` in `user_repo/models/mlp.py`: the first `1024 -> 4096`
 MLP projection, its bias, and exact erf GELU. The second projection and residual addition remain
 separate. This is the withheld reference solution for evaluating an agent's output. Numerical
-coverage is complete; performance acceptance remains **tune**.
+coverage is complete; performance acceptance is **pass** under the documented GEMM compiled-parity policy.
 
-The forward uses cuBLAS `addmm` for the biased linear product, followed by one 1024-element
+The forward uses cuBLAS `addmm` for the biased linear product, followed by one 4096-element
 streaming Triton GELU kernel. The choice follows the existing wide-output GEMM finding that a
 custom mainloop can lose more throughput than a separate epilogue costs. It is an initial
 implementation choice: this golden has no new measurement proving that choice beats a fused
@@ -23,7 +23,10 @@ Backward streams the saved biased preactivation Z and dY through one Triton kern
 (Phi(Z) + Z*phi(Z))`. It writes bf16 dZ and accumulates deterministic fp32 bias partials over
 row tiles. Each loop reduces its tile into a column vector, shortening the accumulator lifetime.
 Eight program waves distribute the row reduction across the GPU. The host launches their
-reduction and two cuBLAS GEMMs, `dX = dZ @ W` and `dW = dZ.T @ X`. Parameter gradients observe
+reduction and `dX = dZ @ W` through cuBLAS. For at most 8192 reduction rows, a 128-by-64, K64 Triton
+GEMM computes `dW = dZ.T @ X` and rounds its accumulator to bf16 before storing fp32
+parameter gradients. This improves output-tile parallelism and removes the separate dtype
+conversion pass. Longer reductions retain cuBLAS. Parameter gradients observe
 the eager bf16 autocast boundary and are returned in fp32. Bias reduction is included in the
 backward cost; there are no per-element parameter atomics.
 
@@ -42,24 +45,26 @@ store.
 
 ## A800 measurements
 
-Fresh full-workload measurements on 2026-09-06 use profiler device times and three interleaved
-rounds, resetting compiler state per workload. Both required model shapes and the two diagnostic
-shapes pass output, inference and gradient comparisons. All four recomputed variants also pass;
-recompute is not the default and is numerically checked without a performance gate.
+Fresh full-workload measurements on 2026-09-08 use profiler device times and three interleaved
+rounds, resetting compiler state per workload. Both required model shapes and both diagnostic
+shapes pass output, inference and gradient comparisons, as do all four recomputed variants.
 
 | Workload | Forward | Backward | Inference | Forward / backward / inference SoL |
 |---|---:|---:|---:|---|
-| user | 0.265569 ms | 0.619678 ms | 0.265359 ms | 0.695 / 0.771 / 0.697 |
-| real_24_views | 2.766779 ms | 5.219802 ms | 2.805243 ms | 0.788 / 0.835 / 0.776 |
-| tail_strided | 0.006336 ms | 0.014703 ms | 0.006240 ms | 0.929 / 0.931 / 0.949 |
-| small | 0.004432 ms | 0.007520 ms | 0.004496 ms | 1.011 / 1.253 / 1.007 |
+| user | 0.264145 ms | 0.564016 ms | 0.264496 ms | 0.701 / 0.856 / 0.700 |
+| real_24_views | 2.793211 ms | 5.229622 ms | 2.814011 ms | 0.796 / 0.848 / 0.773 |
 
-The result remains **tune**. The primary backward is 0.884x compiled, below 0.95; primary
-forward/inference reach 0.695/0.697 of the measured roof. Both fresh primary repeats retain
-these failures. The real 24-view workload passes. The extra round fuses the small gradient
-products into one launch: strided-tail backward improves from 0.021249 ms to 0.014703 ms and
-passes its diagnostic gates. Independent adjoints pass on both small and strided-tail workloads.
-Raw samples and repeats are in `golden.json`; the extra tuning budget is exhausted.
+Status is **pass** under the explicitly authorized GEMM policy: numerical correctness and
+eligible compiled parity >=0.95x determine acceptance; SoL remains visible as a diagnostic.
+Primary backward is 0.981x compiled in the full run and remains above 0.95x in both independent
+repeats. All required forward/inference comparisons also meet the compiled gate. One repeat's
+inference SoL is 0.692; this would miss the old strict 70% gate and is retained rather than
+rounded up. The original captures and subsequent policy review are distinguishable in the JSON.
+
+Independent adjoints pass on small, strided-tail and full primary workloads. Optional small/tail
+numerics pass, but their timing captures lost GPU events; those missing timings remain explicit
+and do not waive any required model shape. The older tuning capture is preserved under
+`historical_capture`. No numerical tolerance or eager rounding boundary was relaxed.
 
 Bytes and FLOPs for the roofline: forward executes `2*M*N*K` tensor-product FLOPs. For this
 two-kernel design its compulsory traffic is `6*(N*K+N) + 2*(M*K+N*K+N+3*M*N)` bytes:
@@ -69,7 +74,8 @@ inference paths have the same streaming traffic; they differ in Z lifetime.
 Backward executes `4*M*N*K` tensor-product FLOPs. Count dY and Z reads, dZ's write and its two
 GEMM reads, X/W reads, dX/dW writes, fp32 bias partial writes and reads, and both
 parameter-gradient dtype conversions. With p row programs, these accesses sum to `10*M*N + 4*M*K
-+ 10*N*K + 8*p*N + 16*N` bytes, excluding cache reuse. For the small fused path, forward traffic
++ C*N*K + 8*p*N + 16*N` bytes, with C=6 for the direct fp32 dW store (M<=8192) and C=10
+for the cuBLAS-plus-conversion path, excluding cache reuse. For the small fused path, forward traffic
 is `2*M*K + 4*N*K + 4*N + 2*M*N`, plus `2*M*N` for saved Z during training. Backward traffic is
 `10*M*N + 4*M*K + 8*N*K + 4*N`; there are no low-precision parameter buffers or bias partials.
 Recompute adds the actual rebuilding forward traffic and `2*M*N*K` FLOPs. The large path adds

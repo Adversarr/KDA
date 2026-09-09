@@ -1,4 +1,4 @@
-"""Standalone key-padded FA2 with GPU mask compaction; see GOLDEN.md."""
+"""Standalone rectangular FA2 with compact per-scene KV; see GOLDEN.md."""
 
 from typing import Dict
 
@@ -392,7 +392,7 @@ def _attn_bwd_dkdv_kernel(
         offs_d,
         mask_d,
         lo,
-        tl.where(start_n * BLOCK_N < SK, SQ, 0),
+        SQ,
         SQ,
         SK,
         scale_log2,
@@ -737,152 +737,122 @@ def _backward(q, k, v, out, do, lse, meta, views):
     return dq, dk, dv
 
 
-def _check(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> None:
-    if q.dtype not in _MMA_DTYPES or k.dtype != q.dtype or v.dtype != q.dtype:
-        raise TypeError(f"attention: q, k, v must share a bf16/fp16 dtype, got {q.dtype}, {k.dtype}, {v.dtype}")
-    if q.dim() != 4 or k.shape != q.shape or v.shape != q.shape:
-        raise ValueError(f"attention (causal, MHA): q, k, v must be (B, H, S, D) of one shape, got {tuple(q.shape)}, {tuple(k.shape)}, {tuple(v.shape)}")
-    if q.shape[-1] > 256:
-        raise ValueError(f"attention: head dim {q.shape[-1]} > 256")
-    for name, t in (("q", q), ("k", k), ("v", v)):
-        if t.stride(-1) != 1:
-            raise ValueError(f"attention: {name} must be contiguous in the head dim")
-        # Offsets *inside* the K,V / Q loops are int32 (int64 there costs 11% on the forward);
-        # the (b, h) base is int64. So one (b, h) plane must be addressable in int32.
-        if t.shape[2] * t.stride(2) >= 2**31:
-            raise ValueError(f"attention: one (batch, head) plane of {name} spans {t.shape[2] * t.stride(2)} elements >= 2^31")
+def _validate(q, k, v, lengths, tokens_per_view):
+    if q.ndim != 4 or q.shape != k.shape or q.shape != v.shape:
+        raise ValueError("q/k/v must have the same (B,H,N,D) shape")
+    if any(
+        x.dtype != torch.bfloat16
+        or x.device != q.device
+        or not x.is_cuda
+        or x.stride(-1) != 1
+        for x in (q, k, v)
+    ):
+        raise ValueError(
+            "q/k/v must be bf16 CUDA tensors on one device with unit last stride"
+        )
+    if not 1 <= q.shape[-1] <= 256:
+        raise ValueError("head width must be in [1,256]")
+    if type(tokens_per_view) is not int or tokens_per_view <= 0:
+        raise ValueError("tokens_per_view must be a positive integer")
+    if not isinstance(lengths, tuple) or len(lengths) != q.shape[0]:
+        raise ValueError(
+            "lengths must be immutable CPU tuples, one row per batch entry"
+        )
+    for row in lengths:
+        if not isinstance(row, tuple) or len(row) * tokens_per_view != q.shape[2]:
+            raise ValueError("each length row must describe every view")
+        if any(type(n) is not int or not 0 <= n <= tokens_per_view for n in row):
+            raise ValueError("prefix lengths must be integers in [0,tokens_per_view]")
+    if any(x.shape[2] * x.stride(2) >= 2**31 for x in (q, k, v)):
+        raise ValueError("each head plane must fit int32 offsets")
 
 
 @triton.jit
-def _scan_mask(MASK, PREFIX, COUNTS, S: tl.constexpr, MS: tl.constexpr,
-               NB: tl.constexpr, BLOCK: tl.constexpr):
-    tile,b = tl.program_id(0),tl.program_id(1)
-    row = tile*BLOCK + tl.arange(0,BLOCK)
-    flag = tl.load(MASK+b.to(tl.int64)*MS+row,row<S,False).to(tl.int32)
-    prefix = tl.cumsum(flag,0)
-    tl.store(PREFIX+b.to(tl.int64)*S+row,tl.where(flag != 0,prefix-1,-1),row<S)
-    tl.store(COUNTS+b*NB+tile,tl.sum(flag,0))
-
-
-@triton.jit
-def _scan_counts(COUNTS, STARTS, META, NB: tl.constexpr, BLOCK: tl.constexpr):
-    b = tl.program_id(0)
-    i = tl.arange(0,BLOCK)
-    count = tl.load(COUNTS+b*NB+i,i<NB,0)
-    prefix = tl.cumsum(count,0)
-    tl.store(STARTS+b*NB+i,prefix-count,i<NB)
-    tl.store(META+b*2,0)
-    tl.store(META+b*2+1,tl.sum(count,0))
-
-
-@triton.jit
-def _pack_mask(K,V,KP,VP,PREFIX,STARTS,H:tl.constexpr,S:tl.constexpr,D:tl.constexpr,
-               KB:tl.constexpr,KH:tl.constexpr,KN:tl.constexpr,
-               VB:tl.constexpr,VH:tl.constexpr,VN:tl.constexpr,
-               NB:tl.constexpr,SCAN:tl.constexpr,BLOCK:tl.constexpr):
+def _pack(K, V, KP, VP, META, H: tl.constexpr, T: tl.constexpr, VIEWS: tl.constexpr,
+          SK: tl.constexpr, D: tl.constexpr,
+          KB: tl.constexpr, KH: tl.constexpr, KN: tl.constexpr,
+          VB: tl.constexpr, VH: tl.constexpr, VN: tl.constexpr, BLOCK: tl.constexpr):
     bh = tl.program_id(1).to(tl.int64)
-    b,h = bh//H,bh%H
-    i = tl.program_id(0)*BLOCK+tl.arange(0,BLOCK)
-    row,d = i//D,i%D
-    local = tl.load(PREFIX+b*S+row,row<S,-1)
-    base = tl.load(STARTS+b*NB+row//SCAN,row<S,0)
-    valid = (row<S)&(local>=0)
-    packed = local+base
-    kval = tl.load(K+b*KB+h*KH+row*KN+d,valid,0)
-    vval = tl.load(V+b*VB+h*VH+row*VN+d,valid,0)
-    tl.store(KP+bh*S*D+packed*D+d,kval,valid)
-    tl.store(VP+bh*S*D+packed*D+d,vval,valid)
+    b, h = bh // H, bh % H
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    row, d = i // D, i % D
+    total = tl.load(META + b * (VIEWS + 1) + VIEWS)
+    original = row
+    for view in tl.static_range(VIEWS):
+        start = tl.load(META + b * (VIEWS + 1) + view)
+        end = tl.load(META + b * (VIEWS + 1) + view + 1)
+        original = tl.where((row >= start) & (row < end), view * T + row - start, original)
+    active = row < tl.maximum(1, total)
+    kval = tl.load(K + b.to(tl.int64)*KB + h*KH + original*KN + d, active, 0)
+    vval = tl.load(V + b.to(tl.int64)*VB + h*VH + original*VN + d, active, 0)
+    tl.store(KP + bh.to(tl.int64)*SK*D + i, kval, active)
+    tl.store(VP + bh.to(tl.int64)*SK*D + i, vval, active)
 
 
 @triton.jit
-def _scatter_mask(DKP,DVP,DK,DV,PREFIX,STARTS,H:tl.constexpr,S:tl.constexpr,
-                  D:tl.constexpr,NB:tl.constexpr,SCAN:tl.constexpr,BLOCK:tl.constexpr):
+def _scatter(DKP, DVP, DK, DV, META, H: tl.constexpr, T: tl.constexpr,
+             VIEWS: tl.constexpr, SK: tl.constexpr, D: tl.constexpr, BLOCK: tl.constexpr):
     bh = tl.program_id(1).to(tl.int64)
-    b = bh//H
-    i = tl.program_id(0)*BLOCK+tl.arange(0,BLOCK)
-    row,d = i//D,i%D
-    local = tl.load(PREFIX+b*S+row,row<S,-1)
-    base = tl.load(STARTS+b*NB+row//SCAN,row<S,0)
-    valid = (row<S)&(local>=0)
-    packed = local+base
-    dk = tl.load(DKP+bh*S*D+packed*D+d,valid,0)
-    dv = tl.load(DVP+bh*S*D+packed*D+d,valid,0)
-    tl.store(DK+bh*S*D+i,dk,row<S)
-    tl.store(DV+bh*S*D+i,dv,row<S)
+    b = bh // H
+    i = tl.program_id(0)*BLOCK + tl.arange(0, BLOCK)
+    row, d = i // D, i % D
+    active = row < VIEWS*T
+    view = row // T
+    start = tl.load(META + b*(VIEWS+1) + view, active, 0)
+    end = tl.load(META + b*(VIEWS+1) + view + 1, active, 0)
+    total = tl.load(META + b*(VIEWS+1) + VIEWS)
+    valid = active & ((row % T < end - start) | ((total == 0) & (row == 0)))
+    packed = start + row % T
+    dk = tl.load(DKP + bh.to(tl.int64)*SK*D + packed*D + d, valid, 0)
+    dv = tl.load(DVP + bh.to(tl.int64)*SK*D + packed*D + d, valid, 0)
+    tl.store(DK + bh.to(tl.int64)*VIEWS*T*D + i, dk, active)
+    tl.store(DV + bh.to(tl.int64)*VIEWS*T*D + i, dv, active)
 
 
-def _check_inputs(q, k, v, mask):
-    _check(q, k, v)
-    b, h, n, d = q.shape
-    if (mask.shape!=(b,n) or mask.dtype!=torch.bool or mask.stride(-1)!=1
-            or mask.device!=q.device):
-        raise ValueError('key_valid must be a bool (B,S) tensor on the input device with unit key stride')
-
-
-def _compact_mask(q,k,v,mask):
-    _check_inputs(q, k, v, mask)
-    b, h, n, d = q.shape
-    nb = triton.cdiv(n,1024)
-    prefix = torch.empty((b,n),dtype=torch.int32,device=q.device)
-    counts = torch.empty((b,nb),dtype=torch.int32,device=q.device)
-    starts = torch.empty_like(counts)
-    meta = torch.empty((b,2),dtype=torch.int32,device=q.device)
-    kp = torch.empty(q.shape,dtype=q.dtype,device=q.device)
+def _compact(k, v, lengths, t):
+    b, h, _, d = k.shape
+    offsets = []
+    for row in lengths:
+        values = [0]
+        for n in row:
+            values.append(values[-1] + n)
+        offsets.append(values)
+    sk = max(1, max(row[-1] for row in offsets))
+    meta = torch.tensor(offsets, dtype=torch.int32, device=k.device)
+    kp = torch.empty((b,h,sk,d), dtype=k.dtype, device=k.device)
     vp = torch.empty_like(kp)
-    _scan_mask[(nb,b)](mask,prefix,counts,n,mask.stride(0),nb,BLOCK=1024)
-    _scan_counts[(b,)](counts,starts,meta,nb,BLOCK=triton.next_power_of_2(nb))
-    _pack_mask[(triton.cdiv(n*d,1024),b*h)](k,v,kp,vp,prefix,starts,h,n,d,*k.stride()[:3],*v.stride()[:3],nb,SCAN=1024,BLOCK=1024)
-    return kp,vp,prefix,starts,meta
+    _pack[(triton.cdiv(sk*d,1024), b*h)](k,v,kp,vp,meta,h,t,len(lengths[0]),sk,d,*k.stride()[:3],*v.stride()[:3],BLOCK=1024)
+    return kp, vp, meta
 
 
-def _packed_backward(q,kp,vp,out,do,lse,prefix,starts,meta):
-    dq,dkp,dvp = _backward(q,kp,vp,out,do,lse,meta,1)
-    b,h,n,d = q.shape
-    dk = torch.empty(q.shape,dtype=q.dtype,device=q.device)
-    dv = torch.empty_like(dk)
-    _scatter_mask[(triton.cdiv(n*d,1024),b*h)](dkp,dvp,dk,dv,prefix,starts,h,n,d,starts.shape[1],SCAN=1024,BLOCK=1024)
-    return dq,dk,dv
-
-
-class _Attention(torch.autograd.Function):
+class _BatchedAttention(torch.autograd.Function):
     @staticmethod
-    def forward(ctx,q,k,v,mask,recompute):
-        kp,vp,prefix,starts,meta = _compact_mask(q,k,v,mask)
-        out,lse = _forward(q,kp,vp,not recompute,meta,1)
-        ctx.save_for_backward(q,kp,vp,out,lse,prefix,starts,meta)
-        ctx.recompute = recompute
+    def forward(ctx,q,k,v,lengths,t,recompute):
+        kp,vp,meta = _compact(k,v,lengths,t)
+        views = len(lengths[0])
+        out,lse = _forward(q,kp,vp,not recompute,meta,views)
+        ctx.save_for_backward(q,kp,vp,out,lse,meta)
+        ctx.t,ctx.views,ctx.recompute = t,views,recompute
         return out
 
     @staticmethod
     def backward(ctx,do):
-        q,kp,vp,out,lse,prefix,starts,meta = ctx.saved_tensors
+        q,kp,vp,out,lse,meta = ctx.saved_tensors
         if ctx.recompute:
-            out,lse = _forward(q,kp,vp,True,meta,1)
-        return (*_packed_backward(q,kp,vp,out,do,lse,prefix,starts,meta),None,None)
+            out,lse = _forward(q,kp,vp,True,meta,ctx.views)
+        dq,dkp,dvp = _backward(q,kp,vp,out,do,lse,meta,ctx.views)
+        b,h,n,d = q.shape
+        dk = torch.empty(q.shape,device=q.device,dtype=q.dtype)
+        dv = torch.empty_like(dk)
+        _scatter[(triton.cdiv(n*d,1024),b*h)](dkp,dvp,dk,dv,meta,h,ctx.t,ctx.views,kp.shape[2],d,BLOCK=1024)
+        return dq,dk,dv,None,None,None
 
 
-def attention_fwd(q,k,v,key_valid,save_aux=True):
-    _check_inputs(q, k, v, key_valid)
-    if q.shape[0]==0 or q.shape[2]==0:
-        _check(q,k,v)
-        return torch.empty_like(q),torch.empty((q.shape[0],q.shape[1],q.shape[2]) if save_aux else (0,),dtype=torch.float32,device=q.device)
-    kp,vp,_,_,meta = _compact_mask(q,k,v,key_valid)
-    return _forward(q,kp,vp,save_aux,meta,1)
-
-
-def attention_bwd(q,k,v,out,do,lse,key_valid):
-    _check_inputs(q, k, v, key_valid)
-    if q.shape[0]==0 or q.shape[2]==0:
-        return torch.empty_like(q),torch.empty_like(k),torch.empty_like(v)
-    kp,vp,prefix,starts,meta = _compact_mask(q,k,v,key_valid)
-    return _packed_backward(q,kp,vp,out,do,lse,prefix,starts,meta)
-
-
-def padded_attention(q,k,v,key_valid,*,recompute=False):
-    _check_inputs(q, k, v, key_valid)
-    if q.shape[0]==0 or q.shape[2]==0:
-        _check(q,k,v)
+def segmented_attention(q,k,v,lengths,tokens_per_view,*,recompute=False):
+    _validate(q,k,v,lengths,tokens_per_view)
+    if q.shape[0] == 0 or q.shape[2] == 0:
         return q+k+v
-    if torch.is_grad_enabled() and any(t.requires_grad for t in (q,k,v)):
-        return _Attention.apply(q,k,v,key_valid,recompute)
-    return attention_fwd(q,k,v,key_valid,False)[0]
+    if torch.is_grad_enabled() and any(x.requires_grad for x in (q,k,v)):
+        return _BatchedAttention.apply(q,k,v,lengths,tokens_per_view,recompute)
+    kp,vp,meta = _compact(k,v,lengths,tokens_per_view)
+    return _forward(q,kp,vp,False,meta,len(lengths[0]))[0]

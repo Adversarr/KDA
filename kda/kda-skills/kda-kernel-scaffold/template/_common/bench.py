@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import statistics
 import math
+import os
+import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
@@ -122,6 +124,8 @@ def _raw_profiler_samples(events, iters: int):
         invalid.append("unexpected annotation count")
     if any(not math.isfinite(t) or t <= 0 for t in times):
         invalid.append("missing positive finite device timing for an iteration")
+    if len(set(counts)) > 1:
+        invalid.append("inconsistent device event counts across identical iterations")
     details = {"cpu_events": cpu_count, "cuda_events": cuda_count,
                "annotations": len(spans), "matched_kernels": counts,
                "samples_ms": [t if math.isfinite(t) else None for t in times]}
@@ -131,19 +135,98 @@ def _raw_profiler_samples(events, iters: int):
     return times
 
 
+def _raw_cuda_sample(events):
+    """One complete callable per CUDA-only trace, without CPU event trees."""
+    from torch.autograd import DeviceType
+
+    durations = []
+    for event in events:
+        if event.device_type() != DeviceType.CUDA:
+            continue
+        if (getattr(event, "is_hidden_event", lambda: False)()
+                or event.is_user_annotation()):
+            continue
+        start, end = event.start_ns(), event.end_ns()
+        if not (math.isfinite(start) and math.isfinite(end) and end > start):
+            raise _IncompleteProfilerTrace({"reason": "invalid CUDA event timestamps"})
+        durations.append(end - start)
+    if not durations:
+        raise _IncompleteProfilerTrace({"reason": "CUDA-only trace has no device events"})
+    return sum(durations) / 1e6, len(durations)
+
+
+def _bench_profiler_cuda_only(fn, warmup, iters, device):
+    from torch.profiler import ProfilerActivity, profile
+
+    if iters <= 0:
+        raise ValueError("profiler iterations must be positive")
+    os.environ.setdefault("TEARDOWN_CUPTI", "1")
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize(device)
+    samples, counts = [], []
+    for _ in range(iters):
+        # Flush before opening the trace, so only this complete callable is timed.
+        _flush_l2(device)
+        torch.cuda.synchronize(device)
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            fn()
+            torch.cuda.synchronize(device)
+        if os.environ.get("TEARDOWN_CUPTI") == "1":
+            time.sleep(0.01)
+            torch.cuda.synchronize(device)
+        result = getattr(getattr(prof, "profiler", None), "kineto_results", None)
+        if result is None:
+            raise _IncompleteProfilerTrace({"reason": "Kineto trace unavailable"})
+        sample, count = _raw_cuda_sample(result.events() or [])
+        samples.append(sample)
+        counts.append(count)
+    if len(set(counts)) != 1:
+        raise _IncompleteProfilerTrace({
+            "reason": "inconsistent CUDA-only device event counts",
+            "matched_kernels": counts, "samples_ms": samples,
+        })
+    return samples
+
+
 def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device) -> List[float]:
     from torch.profiler import ProfilerActivity, profile, record_function
 
+    activity_mode = os.environ.get("KDA_PROFILER_ACTIVITIES", "cpu_cuda")
+    if activity_mode == "cuda":
+        return _bench_profiler_cuda_only(fn, warmup, iters, device)
+    if activity_mode != "cpu_cuda":
+        raise ValueError("KDA_PROFILER_ACTIVITIES must be cpu_cuda or cuda")
+
+    # Long-lived CUPTI timestamp mappings can drop early GPU records after idle
+    # periods. Kineto's supported teardown/reinit path resets collection between
+    # traces. Respect an explicit caller override; incomplete traces still fail.
+    os.environ.setdefault("TEARDOWN_CUPTI", "1")
     for _ in range(warmup):
         fn()
     torch.cuda.synchronize(device)
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+        # Prime CUDA activity collection inside the trace. On long-lived processes
+        # Kineto can omit the first launch group after a fresh profile starts.
+        # These unmeasured calls precede per-iteration cache flushes and markers.
+        for _ in range(max(3, warmup)):
+            _flush_l2(device)
+            torch.cuda.synchronize(device)
+            with record_function("kda_profiler_warmup"):
+                fn()
+                torch.cuda.synchronize(device)
         for i in range(iters):
             _flush_l2(device)
             torch.cuda.synchronize(device)
             with record_function(f"{_MARK}{i}"):
                 fn()
                 torch.cuda.synchronize(device)
+    if os.environ.get("TEARDOWN_CUPTI") == "1":
+        # Kineto registers its finalize callback on a helper thread after stop.
+        # Give it a CUDA API exit before Python/CUDA context destruction, outside
+        # the measured trace, rather than leaving teardown pending at shutdown.
+        time.sleep(0.01)
+        torch.cuda.synchronize(device)
     # prof.events() constructs millions of CPU FunctionEvents for chunked eager
     # baselines. Only raw GPU durations and the ten CPU annotations are needed.
     result = getattr(getattr(prof, "profiler", None), "kineto_results", None)
@@ -153,7 +236,6 @@ def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torc
         return _raw_profiler_samples(result.events() or [], iters)
     except _IncompleteProfilerTrace as exc:
         # Explicit opt-in only: normal reports contain counts/reasons, not paths.
-        import os
         directory = os.environ.get("KDA_PROFILER_DIAGNOSTICS_DIR")
         if directory:
             from pathlib import Path

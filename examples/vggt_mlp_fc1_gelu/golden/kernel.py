@@ -100,7 +100,7 @@ def mlp_fwd(x: torch.Tensor, w: torch.Tensor, b: torch.Tensor, save_aux: bool = 
     z = torch.addmm(blow, x2, wlow.t())
     y = torch.empty_like(z)
     if z.numel():
-        _gelu_forward[(triton.cdiv(z.numel(), 1024),)](z, y, z.numel(), BLOCK=1024)
+        _gelu_forward[(triton.cdiv(z.numel(), 4096),)](z, y, z.numel(), BLOCK=4096)
     return y.view(*x.shape[:-1], w.shape[0]), z if save_aux else z.new_empty(0), wlow
 
 
@@ -122,7 +122,8 @@ def mlp_bwd(dy: torch.Tensor, x: torch.Tensor, wlow: torch.Tensor, b: torch.Tens
         dy2, z, b, dz, partial, M, N, dy2.stride(0), dy2.stride(1),
         BLOCK_M=32, BLOCK_N=128, ACT=2, HAS_BIAS=True, Z_HAS_BIAS=True, num_warps=4)
     dx = torch.matmul(dz, wlow).view(x.shape)
-    dw = torch.matmul(dz.t(), x2)
+    # Finer output tiles and a fused dtype boundary help moderate reduction lengths.
+    dw = _weight_gradient(dz, x2) if M <= 8192 else torch.matmul(dz.t(), x2)
     db = partial.sum(0).to(x.dtype).to(b.dtype)
     return dx, dw, db
 
@@ -250,3 +251,27 @@ def mlp_fc1_gelu(x: torch.Tensor, w1: torch.Tensor, b1: torch.Tensor, *, recompu
     if not training:
         return mlp_fwd(x, w1, b1, False)[0]
     return _MLP.apply(x, w1, b1, recompute)
+
+@triton.jit
+def _weight_grad(DZ, X, DW, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,
+                 SX, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
+    n = tl.program_id(0) * BM + tl.arange(0, BM)
+    k = tl.program_id(1) * BN + tl.arange(0, BN)
+    r = tl.arange(0, BK)
+    acc = tl.zeros((BM, BN), tl.float32)
+    for block in range(tl.cdiv(M, BK)):
+        rows = block * BK + r
+        a = tl.load(DZ + rows[None, :] * N + n[:, None], (rows[None, :] < M) & (n[:, None] < N), 0)
+        b = tl.load(X + rows[:, None] * SX + k[None, :], (rows[:, None] < M) & (k[None, :] < K), 0)
+        acc = tl.dot(a, b, acc)
+    # Preserve autocast's bf16 parameter-adjoint boundary without a conversion pass.
+    tl.store(DW + n[:, None] * K + k[None, :], acc.to(DZ.dtype.element_ty).to(tl.float32), (n[:, None] < N) & (k[None, :] < K))
+
+
+def _weight_gradient(dz, x):
+    m, n = dz.shape
+    k = x.shape[1]
+    out = torch.empty((n, k), device=x.device, dtype=torch.float32)
+    _weight_grad[(triton.cdiv(n, 128), triton.cdiv(k, 64))](
+        dz, x, out, m, n, k, x.stride(0), BM=128, BN=64, BK=64, num_warps=4, num_stages=3)
+    return out

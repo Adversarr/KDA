@@ -43,3 +43,7 @@ loss, backward and optimizer exercise its trainable parameters.
 - `multiview/encoder.py`
 - `multiview/mlp.py`
 - `multiview/train.py`
+
+The mixed-precision eager path is validated with the repository CUDA/PyTorch 2.11
+image. It uses `torch.bmm(..., out_dtype=torch.float32)` for low-precision
+operands with FP32 product outputs, and an explicit Flash-style adjoint.
