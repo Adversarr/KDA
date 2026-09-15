@@ -330,6 +330,42 @@ def copy_ms(nbytes: float, *, method: str = "auto", device: Optional[torch.devic
     return bench_ms(lambda: dst.copy_(src), method=method, device=device)
 
 
+_FP32_CACHE: Dict[tuple, dict] = {}
+
+
+def fp32_ms(flops: float, *, method: str = "profiler", device=None) -> dict:
+    """Device-local IEEE FP32 SGEMM throughput proxy, excluding Tensor Cores.
+
+    Scale useful arithmetic by measured dense CUDA-core throughput. This does not
+    model reductions, SFUs, conversions or L1/L2 instruction service. It supplements
+    the copy floor; neither component establishes an operator's attainable optimum.
+    Calibration is independent of the candidate and cached per device/method.
+    """
+    device = _current_device(device)
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    device = torch.device("cuda", index)
+    key = (index, method)
+    if key not in _FP32_CACHE:
+        n = 4096
+        generator = torch.Generator(device=device).manual_seed(1729)
+        a = torch.randn((n, n), device=device, dtype=torch.float32, generator=generator)
+        b = torch.randn((n, n), device=device, dtype=torch.float32, generator=generator)
+        out = torch.empty_like(a)
+        precision = torch.get_float32_matmul_precision()
+        try:
+            torch.set_float32_matmul_precision("highest")
+            samples = [bench_ms(lambda: torch.mm(a, b, out=out), warmup=3, iters=10,
+                                method=method, device=device) for _ in range(3)]
+        finally:
+            torch.set_float32_matmul_precision(precision)
+        tflops = 2 * n ** 3 / (min(samples) * 1e9)
+        _FP32_CACHE[key] = dict(method="fp32_sgemm_throughput", available=True,
+            device=torch.cuda.get_device_name(device), shape=[n, n, n],
+            precision="highest", tf32=False, samples_ms=samples, tflops=tflops,
+            scope="FP32 add/multiply throughput proxy; excludes SFU and reduction overhead")
+    return dict(_FP32_CACHE[key], roof_ms=max(0., flops) / (_FP32_CACHE[key]["tflops"] * 1e9))
+
+
 def matmul_ms(
     flops: float,
     *,
