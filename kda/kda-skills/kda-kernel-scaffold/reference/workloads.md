@@ -279,3 +279,13 @@ backward when the aux is saved: the inputs it pins (`x`, `residual`), the user-v
 it needs (`y`), and the aux itself; parameters (`weight`, `bias`) are excluded because they
 exist regardless. Say the definition in the `why` when the set is not obvious
 (`Z / (x + residual + y + Z)`).
+
+## Storage and verification identity
+
+Use `storage_offsets: {input: element_offset}` and `storage_groups: {q: qkv, k: qkv}`
+for views sharing a same-dtype allocation. Inputs without a group own separate storage.
+The runner reconstructs backing storage before each phase and rejects layout drift; do not
+replace this with per-tensor clone/contiguous. Customize input scales in place so groups survive.
+The runner calls `interface.call_explicit`, whose signature must mirror the public operation;
+it bypasses environment selection and fallback. The eager branch calls the original reference
+directly. Public selection/fallback is a separate adapter test, never the numerical oracle.

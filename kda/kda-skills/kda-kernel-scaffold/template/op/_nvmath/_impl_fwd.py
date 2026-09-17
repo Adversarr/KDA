@@ -9,7 +9,7 @@ the aux store of the pre-activation) is applied inside that kernel. Read
   feature bias of ``nn.Linear`` compute ``Y^T = W X^T`` (``a = w`` (N, K), ``b = x.t()``); the
   result is ``Y^T`` column-major, so ``.t()`` is the row-major ``Y`` for free. The aux
   (``gelu_aux``) comes back the same way with rows padded to a multiple of 8: slice ``[:N]``.
-* **Plan once, execute many.** Keep the planned `Matmul` per key in `_PLANS`; `reset_operands`
+* **Plan once, execute many.** Keep the planned `Matmul` in bounded thread-local `_PLANS`; `reset_operands`
   + `execute` per call (the function form `nvmath.linalg.advanced.matmul` replans every call).
   `plan(epilog=None)` for no epilogue: ``MatmulEpilog.DEFAULT`` is rejected.
 * **GELU is the tanh form** (`F.gelu(approximate="tanh")`); the erf form is not fusable and
@@ -29,21 +29,16 @@ from typing import Dict, Optional, Tuple
 import torch
 from nvmath.linalg.advanced import Matmul, MatmulEpilog
 
-_PLANS: Dict[tuple, Matmul] = {}
+from ..._common.plan_cache import PlanCache
+
+_PLANS = PlanCache(capacity=8)
+clear_plan_cache = _PLANS.clear
 
 
-def _plan(a: torch.Tensor, b: torch.Tensor, epilog: Optional[MatmulEpilog], bias: Optional[torch.Tensor]) -> Matmul:
-    """One planned `Matmul` per (shapes, strides, dtype, epilog, has_bias, device); operands reset per call."""
-    key = (tuple(a.shape), tuple(b.shape), a.stride(), b.stride(), a.dtype, epilog, bias is not None, a.device.index)
-    inputs = {"bias": bias} if bias is not None else None
-    mm = _PLANS.get(key)
-    if mm is None:
-        mm = Matmul(a, b)
-        mm.plan(epilog=None if epilog in (None, MatmulEpilog.DEFAULT) else epilog, epilog_inputs=inputs)
-        _PLANS[key] = mm
-    else:
-        mm.reset_operands(a=a, b=b, epilog_inputs=inputs)
-    return mm
+def _product(a, b, epilog, bias):
+    """Execute a bounded plan without retaining operands."""
+    return _PLANS.execute(a, b, bias=bias,
+                          epilog=None if epilog in (None, MatmulEpilog.DEFAULT) else epilog)
 
 
 def {{op}}_fwd(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, save_aux: bool) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -56,7 +51,7 @@ def {{op}}_fwd(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, save_aux: b
     # M, K = x.shape; N = w.shape[0]
     # xt = x.t()                                   # (K, M) view, strides (1, stride_xm): no copy
     # epilog = MatmulEpilog.GELU_AUX_BIAS if save_aux else MatmulEpilog.GELU_BIAS
-    # out = _plan(w, xt, epilog, bias).execute()
+    # out = _product(w, xt, epilog, bias)
     # yT, auxd = out if save_aux else (out, None)
     # y = yT.t()                                   # row-major (M, N) for free
     # aux = auxd["gelu_aux"][:N].t().contiguous() if save_aux else x.new_empty(0)  # `Z + b`; contiguous only copies when N % 8 != 0

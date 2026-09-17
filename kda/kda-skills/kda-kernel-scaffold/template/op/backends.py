@@ -13,7 +13,10 @@ BACKEND_KERNEL = KERNEL_BACKEND
 BACKEND_KERNEL_FWD_ONLY = f"{KERNEL_BACKEND}_fwd_only"
 
 BACKENDS = (BACKEND_EAGER, BACKEND_KERNEL, BACKEND_KERNEL_FWD_ONLY)
-BACKEND_DEFAULT = BACKEND_KERNEL
+BACKEND_AUTO = "auto"
+BACKENDS = (*BACKENDS, BACKEND_AUTO)
+BACKEND_DEFAULT = BACKEND_AUTO
+CAPABILITY = "{{capability}}"
 
 # Mirrors SPEC ``recompute``: the scaffold sets these from the M1 decision, and
 # ``_run_dev.py`` refuses to run when they disagree with SPEC.md.

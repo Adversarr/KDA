@@ -1,7 +1,8 @@
 # Evidence protocol
 
 The runner computes raw numerics/performance; the verifier finalizes the audit. STATUS owns
-workflow progression. Existing thresholds in `_common/report.py` are the machine rules;
+workflow progression. New reports use schema_version 2 and scope operation. Diagnostic policy leaves SOL/baseline
+thresholds as observations; explicit strict_kernel uses `_common/report.py` gates.
 reference measurements and proposed optimizations do not change them.
 
 ## Reports and finalization
@@ -17,7 +18,7 @@ workloads, recompute numerics when available, recompute performance when default
 runs do not require timings. Compiled baselines remain optional. Exit codes: pass/tune 0,
 fail 1, invalid inputs 2, incomplete 3. Exit 0 alone does not mean performance passed.
 
-After the complete record, forward-only verification and source/lint/probe audit, write
+After the complete record, capability-appropriate gradient verification and source/lint/probe audit, write
 `<op_dir>/audit.json`. All audit rows in the verifier skill must be answered in `notes`;
 include the lint table and source/measurement references. The audit format is:
 
@@ -52,7 +53,7 @@ correctness/contract/lint/source audit), `unresolved` (missing evidence or uncer
 python -m kda_kernels.<op>._run_dev --finalize-audit <op_dir>/audit.json
 ```
 
-This performs no GPU measurements. It requires complete benchmark and forward-only evidence
+This performs no GPU measurements. It requires complete benchmark and (for training capability) forward-only evidence
 bound to current SPEC, operation code and shared runtime hashes. The JSON `verification`
 object is authoritative for M3/M5; absent finalization is unfinished. Its precedence is
 `fail > incomplete > tune > pass`. Hard findings force failure, unresolved findings prevent
@@ -61,7 +62,7 @@ and ends with `Diagnosis:`. Preserve raw measurements; do not hand-edit a verdic
 
 ## Noise and missing measurements
 
-For each tagged near-gate workload, repeat twice into unique side files:
+Only under strict_kernel, for each tagged near-gate workload repeat twice into unique side files:
 
 ```bash
 python -m kda_kernels.<op>._run_dev --bench --workload <row> --method profiler --json <op_dir>/report.rerun.<run>.<row>.1.json --md <op_dir>/report.rerun.<run>.<row>.1.md
@@ -73,8 +74,9 @@ List both operation-relative JSON paths under `reruns: {"<row>": ["report.rerun.
 measurement spread needs checking. Report all samples. A gate that changes between record
 and repeat is incomplete; do not choose the fastest sample or tune automatically. After
 these repeats, report unresolved environment/measurement limitations rather than cycling.
-A missing/zero profiler sample cannot prove performance from numerics alone. Event timing is
-a separate optional host-overhead diagnostic, never the final M3 record.
+A missing/zero profiler sample cannot prove performance from numerics alone. CUDA event timing measures a stream interval; profiler sums device activity durations.
+Their difference is not host overhead. Request wall time is collected without profiling;
+keep cold, warm and real-context experiments separate. Preserve raw samples and actual methods.
 
 ## Checkpoints and retries
 
@@ -100,9 +102,17 @@ report keeps its iteration while STATUS records the rejected run as consumed.
 
 ## Existing generated packages
 
-Runtime version 0.5.0 adds expected coverage, source hashes and finalized verification.
-Legacy callers remain callable but old reports without this evidence cannot pass the new
-M3 checkpoint. `scaffold.py --sync-common` updates only the shared runtime: merge the new
-runner argument/coverage/finalization changes into a customized `_run_dev.py` and rerun
-verification. Preserve its operation-specific input generator. Never use `--force` to
-replace an implemented package as an upgrade shortcut.
+Runtime 0.7.0 adds SPEC v3, capabilities, raw measurements, dependency groups and scoped
+acceptance. SPEC v2 and legacy reports remain readable; old runtime calls stay callable.
+Historical evidence is never promoted into new task acceptance.
+
+`scaffold.py --dest <package> --check-upgrade` is read-only and lists missing fields and runner
+features. `--sync-common` updates only the shared runtime. Explicitly merge the customized
+runner, retaining its input factory and numerical contract; choose capability and policy in
+SPEC v3, then collect fresh evidence. `--force` cannot overwrite an existing package.
+
+See [acceptance and invalidation](acceptance.md). Ordinary Markdown edits preserve evidence;
+parsed contract changes invalidate dependent results. Keep raw samples for analysis-only
+changes, rederive outcomes and obtain a new audit binding. Collection-boundary changes require
+remeasurement. The task manifest links final source/commit, contract, effective reports and
+unresolved items; an older committed report does not override a newer failed result.

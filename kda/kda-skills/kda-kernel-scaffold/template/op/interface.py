@@ -1,16 +1,25 @@
 """User-facing API for `{{op}}`: contract checks, backend/recompute resolution, dispatch."""
 
 from typing import Optional, Tuple
+from importlib.util import find_spec
+from importlib.metadata import version, PackageNotFoundError
 
 import torch
 
-from .._common.compat import check_versions
+from .._common.compat import check_versions, needs_backward
 from .._common.env import resolve_backend, resolve_recompute
-from .backends import BACKEND_DEFAULT, BACKENDS, RECOMPUTE_AVAILABLE, RECOMPUTE_DEFAULT
+from .backends import BACKEND_DEFAULT, BACKENDS, RECOMPUTE_AVAILABLE, RECOMPUTE_DEFAULT, CAPABILITY
 from ._dispatch import dispatch
 from ._helpers import check_cuda, check_dtype_in, check_last_dim_contiguous
 
 check_versions()
+_HAS_DEPENDENCY = find_spec("{{kernel_backend}}") is not None
+if _HAS_DEPENDENCY and "{{kernel_backend}}" == "nvmath":
+    try:
+        _HAS_DEPENDENCY = int(version("nvmath-python").split(".")[0]) == 1
+    except PackageNotFoundError:
+        _HAS_DEPENDENCY = False
+
 
 # Process-wide defaults for call sites that cannot pass ``backend=`` / ``recompute=`` (a free
 # function that never sees the config). Set once where the model is built; ``KDA_BACKEND`` and
@@ -54,7 +63,7 @@ def {{op}}(
     Args:
         x: TODO.
         backend: one of ``BACKENDS``; ``None`` means ``KDA_BACKEND`` from the environment,
-            else ``set_default_backend(...)``, else the package default (``{{kernel_backend}}``).
+            else ``set_default_backend(...)``, else the package default (``auto``).
         recompute: recompute the saved-for-backward tensors in the backward instead of
             storing them (SPEC ``recompute``); ``None`` means ``KDA_RECOMPUTE`` from the
             environment, else ``set_default_recompute(...)``, else SPEC's default. Ignored
@@ -63,13 +72,54 @@ def {{op}}(
     Returns:
         A tuple of tensors, see SPEC.md.
     """
-    _check_contract(x)
+    _check_math(x)
     chosen = resolve_backend(backend or _default_backend, BACKEND_DEFAULT, BACKENDS)
     rc = resolve_recompute(recompute if recompute is not None else _default_recompute, RECOMPUTE_DEFAULT)
-    return dispatch(chosen, x, recompute=rc and RECOMPUTE_AVAILABLE)
+    if chosen == "auto":
+        chosen = "{{kernel_backend}}" if _supports_kernel(x) else "eager"
+    return call_explicit(chosen, x, recompute=rc and RECOMPUTE_AVAILABLE)
 
 
 # TODO(scaffold): only when the user's source op is an nn.Module, add a drop-in Module here
 # that owns the parameters and calls the functional API above; otherwise delete this comment.
 
 __all__ = ["{{op}}", "set_default_backend", "set_default_recompute"]
+
+
+def call_explicit(backend: str, x: torch.Tensor, *, recompute: bool = False) -> Tuple[torch.Tensor, ...]:
+    """Execute the named verification path without environment overrides or fallback.
+
+    Mirror the public operation signature when adapting this template.
+    """
+    _check_math(x)
+    if backend == "eager":
+        from ._eager import {{op}}_eager
+        return {{op}}_eager(x)
+    if not _supports_kernel(x):
+        raise ValueError("input or dependency is outside the accelerated contract")
+    _check_contract(x)
+    return dispatch(backend, x, recompute=recompute)
+
+
+def _check_math(x: torch.Tensor) -> None:
+    """Validate mathematical inputs independently of acceleration support."""
+    if not isinstance(x, torch.Tensor) or not x.is_floating_point():
+        raise TypeError("x must be a floating-point tensor")
+    if CAPABILITY == "inference" and needs_backward(x):
+        raise ValueError("inference capability does not support gradient-bearing calls")
+    # TODO: Add the original operation's shape and scalar constraints here.
+
+
+def _supports_kernel(x: torch.Tensor) -> bool:
+    """Decide support before importing or executing the accelerated implementation."""
+    dependency = "{{kernel_backend}}"
+    if not x.is_cuda or x.dim() == 0 or x.stride(-1) != 1:
+        return False
+    if x.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        return False
+    if not _HAS_DEPENDENCY:
+        return False
+    if dependency == "nvmath" and torch.cuda.is_current_stream_capturing():
+        return False
+    # TODO: Include every operation-specific acceleration constraint here.
+    return True

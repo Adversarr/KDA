@@ -5,7 +5,7 @@ description: Audit and verify one generated KDA operation after implementation, 
 
 # KDA verifier (M3)
 
-Goal: establish whether the current package satisfies its SPEC and performance gates, with
+Goal: establish whether the current package satisfies its SPEC and declared performance policy, with
 reproducible evidence. With an independent worker, review code you did not implement. In a
 serial fallback, perform the same checks and record `same_context`; do not claim independence.
 Follow host instructions, explicit user constraints and the orchestrator's authorized scope.
@@ -20,6 +20,15 @@ contains `kda_kernels/`; scratch probes run as modules under that package. `<kb>
 `kernel_backend` (`triton`, `nvmath`, `tilelang`). Read the
 [authoritative evidence protocol](../kda-kernels/reference/evidence.md) before writing reports.
 
+## Scope
+
+Dispatch declares `scope: operation | integration` (legacy default: operation). For integration,
+read [the integration contract](../kda-kernels/reference/integration-contract.md), independently
+reconstruct the original caller/input contract, inspect the complete change set and assess
+actual invocation evidence. Return that scope's result; a passing op does not certify a model.
+For operation scope, first compare SPEC/eager/input preparation with original callers, then
+follow the checks below. Distinguish reproduced defects from preventive hardening.
+
 ## 1. Audit the current package
 
 Read STATUS, full SPEC, implementation notes, interface and eager reference, then the selected
@@ -32,6 +41,7 @@ its measurement context. Answer every audit row in the audit's Markdown `notes`:
 | SPEC and coverage | `validate_spec(load_spec(...))` yields no errors; observed user workloads and the class's required rows exist. A missing required row is incomplete, not an optional note. |
 | Eager identity | Compare source region and `_eager.py`: same signature, outputs, eps, casts and rounding. After integration, use the preserved reference and recorded integration change set. |
 | Interface | Read all input checks for device, dtype, shape, layout and op-specific limits. Contract probes must reject bad inputs before a launch and accept supported empty/no-grad paths. The harness probes one workload/first tensor; inspect constraints it cannot invent. |
+| Execution identity | Verify explicit eager/kernel entries, actual input metadata and storage relationships for every phase. Exercise public environment selection separately. Check output dtype/device, alias/layout contracts and input mutation before numerical comparisons. |
 | Compute semantics | Kernel arithmetic and documented rounding points match SPEC. Compare tensor-core operand/storage dtypes and accumulator dtype. |
 | Pattern | Check the selected structure and its actual supported dimensions. Measured alternatives need recorded rationale and evidence. Hardware observations are not additional passing thresholds. |
 | Autograd state | SPEC `saved_for_backward` lists materialized auxiliaries. Check those in saved-aux mode and the separately documented retained inputs/outputs needed for backward. Under recompute, retain reconstruction inputs instead of requiring absent aux; inference stores no aux. |
@@ -55,11 +65,14 @@ measurement evidence, including any untested limitation.
 
 ```bash
 python -m kda_kernels.<op>._run_dev --verify --bench --backend <kb> --method profiler --iteration <n>
+# training capability only:
 python -m kda_kernels.<op>._run_dev --verify --backend <kb>_fwd_only --json <op_dir>/report.fwd_only.json --md <op_dir>/report.fwd_only.md --iteration <n>
 ```
 
 The first command covers all SPEC rows and owns the canonical report. The second isolates
-forward registration/numerics from a fused backward error. Preserve source between runs;
+forward registration/numerics from a fused backward error for training packages only.
+For eager_grad, verify its eager adjoint and partial-output/input gradients directly; its
+fwd_only compatibility alias is not independent evidence. Inference requires forward only. Preserve source between runs;
 source edits require new evidence. Missing GPU, required OOM/skips, zero profiler samples or
 missing required results are incomplete evidence. Record the blocker; never infer a timed
 pass from successful numerics. Optional memory-heavy skipped diagnostics remain notes.
@@ -70,14 +83,16 @@ roof does not alone violate the datasheet. Use the runtime's below-datasheet che
 its counts before attributing impossible speed. Missing a GEMM can lower `roof_ms` and thus
 lower its ratio to a fixed kernel time. Preserve all measured reference numbers.
 
-Run two scoped repeats for tagged near-gate workloads as the evidence protocol specifies;
+Under explicit strict_kernel policy only, run two scoped repeats for tagged near-gate workloads as the evidence protocol specifies;
 include all samples in `audit.reruns`. A gate crossing the observed spread is incomplete,
 not an opportunity to select the better sample. After those repeats report unresolved
 measurement conditions without cycling. Numerical/audit failure remains failure.
 
-When a host-overhead question matters, run an event-timed side diagnostic with explicit
-`--json` and `--md` paths, compare it with profiler time and name the limitations. Otherwise
-record it as not measured. Never report an unmeasured difference as zero.
+Choose the measurement layer that answers the question. Record actual method and cache policy
+per phase. Cold profiler results support compatible roof diagnostics; stream elapsed supports
+stream intervals; unprofiled request wall time evaluates the deployment target. See
+[measurement semantics](../kda-kernel-scaffold/reference/measurement.md). Never subtract
+independent event/profiler statistics to claim host overhead.
 
 Completion: full current report plus current forward-only evidence, all repeat paths
 preserved, and any unavailable evidence explicitly identified.
@@ -122,6 +137,7 @@ contract checks are never waived to reduce tool calls.
 Read `.agents/skills/kda-kernel-verify-and-bench/SKILL.md` and perform its checks.
 repo_root: <absolute repository root>
 op_dir: <absolute operation directory>
+scope: <operation | integration>
 mode: <verify | freeze>
 iteration: <run number from STATUS>
 python: <GPU interpreter command>
@@ -129,3 +145,12 @@ context: <independent | same_context>
 candidate_report: <record/checkpoint path, or none>
 Do not spawn subagents. Source files are read-only; return the stage report.
 ```
+
+### Policy and acceptance
+
+New SPEC defaults to `performance_policy: diagnostic`. SOL and isolated baseline misses
+remain observations; only explicit `strict_kernel` uses the legacy performance verdict and
+near-gate reruns above. Do not request extra experiments to clear diagnostic SOL. Use
+[scoped acceptance](../kda-kernels/reference/acceptance.md) for separate correctness,
+integration, performance and delivery conclusions. A finalized operation verdict describes
+only operation scope. Task delivery reads `acceptance.json`, never a single op pass.

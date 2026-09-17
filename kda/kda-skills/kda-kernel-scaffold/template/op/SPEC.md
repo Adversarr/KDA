@@ -1,5 +1,5 @@
 ---
-kda_spec: 2
+kda_spec: 3
 op: {{op}}
 common_version: {{common_version}}
 source:
@@ -7,8 +7,10 @@ source:
   symbol: TODO.Class.method_or_function
 kernel_backend: {{kernel_backend}}   # supported explicit user choice; otherwise applicable nvmath (GEMM with supported cuBLASLt epilogue); otherwise triton. TileLang is experimental.
 compute_pattern: TODO                # a pattern name from compute-patterns.md (e.g. rowwise_onepass)
-backward: fused            # fused | eager  (eager requires backward_reason)
-backward_reason: null
+capability: {{capability}}
+performance_policy: diagnostic  # strict_kernel explicitly enables legacy SOL/baseline gates
+backward: {{backward}}            # fused | eager  (eager requires backward_reason)
+backward_reason: capability selected from observed workload
 compute_dtype: fp32                  # fp32 | bf16 | fp16: elementwise math and the MMA accumulator dtype
 compute_dtype_source: default        # user | inferred | default (the M1 gate states which)
 recompute:                           # second training path that recomputes aux instead of saving it
@@ -18,6 +20,8 @@ recompute:                           # second training path that recomputes aux 
 target_archs: [sm80, sm90, sm100]
 row_inputs: null                     # inputs whose leading dim is the token/row dim, e.g. [x, residual]; null = every input sharing x's leading dim (wrong for a GEMM weight (N, K) when N == M)
 tolerances: {}             # per-dtype [atol, rtol] overrides; defaults: fp32 1e-5, fp16 1e-3, bf16 1.6e-2
+input_mutation: forbidden
+output_contracts: {}      # out0: {stride: reference, aliases: reference}; input mutation forbidden
 saved_for_backward: []     # materialized auxiliaries [{name, shape, dtype, bytes, why}]; retained inputs/outputs documented separately
 workloads:
   # The user's real shapes come first and are required; then representative and edge shapes.
@@ -28,8 +32,10 @@ workloads:
     dtype: bf16
     shapes: {x: [TODO]}
     strides: {}            # optional per input, same rank as shapes, last stride 1; omitted = contiguous
+    storage_offsets: {}   # optional element offsets
+    storage_groups: {}    # shared labels preserve alias relationships
     dtypes: {}
-    grad_inputs: null
+    grad_inputs: {{grad_inputs}}
     params: {}             # scalar kwargs; write floats with a dot (1.0e-6, not 1e-6)
 hardware: []               # paste get_gpu_info().as_dict() (scaffold SKILL step 7); one entry per validated GPU
 integration:

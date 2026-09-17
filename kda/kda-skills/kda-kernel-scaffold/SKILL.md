@@ -74,7 +74,9 @@ Gather, from the user's message, the code and the training config, before writin
 - **Pattern and kernel backend**: match the region to one row of
   `.agents/skills/kda-kernel-implement/reference/common/compute-patterns.md` (`compute_pattern`);
   the row's default `kernel_backend` is the package's unless the user asks for the other.
-- **Backward**: does the region run under autograd in training? Default `backward: fused`.
+- **Capability**: choose from observed execution. Training uses training with fused backward;
+  inference tasks normally use eager_grad to preserve original gradient compatibility.
+  Choose inference only for an explicitly forward-only API; gradient-bearing calls then fail.
 - **Recompute ratio**: aux bytes (the `saved_for_backward` tensors that are not user-visible
   outputs) over activation bytes (inputs + outputs) on the user workload. At >= 10% propose
   `recompute.available: true` at the gate with the backward overhead (extra bytes and FLOPs
@@ -103,8 +105,11 @@ python runs, including a container that mounts the repo elsewhere). This command
 GPU and no torch: any python 3.8+ runs it, the GPU interpreter is fine too:
 
 ```bash
-python .agents/skills/kda-kernel-scaffold/scaffold.py --op <op> --dest kda_kernels --kernel-backend triton
+python .agents/skills/kda-kernel-scaffold/scaffold.py --op <op> --dest kda_kernels --kernel-backend triton --capability eager_grad
 ```
+
+Select training for an observed training workload, or inference for a forward-only contract.
+Omitting the option retains the legacy training-template default.
 
 Honor a supported explicit backend choice first. Otherwise use `--kernel-backend triton`
 except for `gemm_tensorcore`, which takes `nvmath` when
@@ -145,13 +150,19 @@ rows. The checklist per op:
 | row | rule |
 |---|---|
 | device | every tensor input on the same CUDA device |
-| dtype | each input's allowed set is what the user's code feeds it (a weight the model keeps fp32 is `{fp32}`; the activation `{bf16, fp16, fp32}`); the eager reference accepting more is not the contract |
+| dtype | each input's allowed set is what the user's code feeds it (a weight the model keeps fp32 is `{fp32}`; the activation `{bf16, fp16, fp32}`); this is the accelerated subset; mathematically valid inputs outside it use eager under auto |
 | rank / shape | ranks fixed; inputs sharing a dimension checked with `check_same_shape` / `check_last_dim` |
 | last stride | `check_last_dim_contiguous` on every tensor the kernel indexes; leading layouts match SPEC; `rows_and_stride` requires collapsible leading dimensions |
 | kernel limits | the pattern's caps (`D <= 8192` for a fused row-wise backward, MMA-shape multiples for GEMM) |
 | row count | `n_rows < 2**31` when program ids index rows (int64 offsets cover elements, not the grid) |
 
-Every check raises `ValueError`/`TypeError` before any launch. `_run_dev.py --contract`
+Keep mathematical checks in `_check_math`, accelerated support in `_supports_kernel`, and
+strict launch checks in `_check_contract`. Mirror the full operation signature in
+`call_explicit`; it bypasses environment selection and fallback for verification. Public
+auto accepts valid unsupported inputs through eager; explicit kernel selection applies
+the table strictly. Execution exceptions propagate.
+
+Every strict check raises `ValueError`/`TypeError` before any launch. `_run_dev.py --contract`
 exercises the table mechanically on the first user workload, mutating the first tensor input:
 `cpu_tensor`, `bad_last_stride` (last stride 2), `shape_mismatch` (last dim narrowed by one,
 only when another input shares that dim), `bad_dtype` (int32) must raise; `zero_rows`
@@ -347,3 +358,16 @@ scope. Present a short model-level update; link SPEC instead of asking the user 
 roofline formulas or launch choices. Ask only for unresolved semantics or a material change to
 numerical requirements, or when the user explicitly requested stage-by-stage approval.
 The orchestrator owns continuation and the remaining integration review.
+
+## Capability and adapter boundary
+
+Pass `--capability eager_grad` for inference that preserves existing gradient semantics;
+use `inference` only for an explicitly gradient-free API and `training` for fused backward.
+The CLI default remains training for compatibility. Non-training packages omit backward
+implementation files and recompute. Their forward-only alias is not independent evidence.
+Keep `call_explicit` aligned with the public signature; it never reads environment overrides.
+Public `auto` validates mathematics, checks backend support before launch, then selects kernel
+or eager. Explicit backends are strict. Put all unsupported shape/dtype/dependency/capture
+conditions in the support predicate. Never catch execution failures to silently fall back.
+Use optional `output_contracts: {out0: {stride: reference, aliases: reference}}` only where
+observable layout/alias preservation belongs to the original API contract.

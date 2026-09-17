@@ -6,7 +6,7 @@ workloads, tolerances and the backward policy have a single source of truth.
 
 Front matter fields (see the scaffold template for a filled example)::
 
-    kda_spec: 2
+    kda_spec: 3
     op: <snake_case op name>
     common_version: <_common/VERSION this op was generated against>
     source: {path, symbol}
@@ -44,10 +44,10 @@ from .verify import DTYPES, TOLERANCES
 # (positions on a grid, an `inv_freq` table) overrides them in `_run_dev.make_inputs`.
 INDEX_DTYPES: Dict[str, torch.dtype] = {"bool": torch.bool, "int32": torch.int32, "int64": torch.int64}
 
-SPEC_VERSION = 2
+SPEC_VERSION = 3
 FRONT_MATTER_DELIM = "---"
 WORKLOAD_SOURCES = ("user", "representative", "edge")
-BACKWARD_MODES = ("fused", "eager")
+BACKWARD_MODES = ("fused", "eager", "none")
 KERNEL_BACKENDS = ("triton", "nvmath", "tilelang")  # nvmath = cuBLASLt through nvmath-python (GEMM + epilogue, no kernel); tilelang experimental
 COMPUTE_DTYPE_SOURCES = ("user", "inferred", "default")
 # Mirrored, row for row, by kda-kernel-implement/reference/common/compute-patterns.md.
@@ -95,6 +95,11 @@ class Workload:
     grad_inputs: Optional[List[str]] = None  # inputs that receive gradients; None = all
     params: Dict[str, Any] = field(default_factory=dict)  # non-tensor kwargs, e.g. {eps: 1.0e-6}
 
+    storage_offsets: Dict[str, int] = field(default_factory=dict)
+    """Element offsets into backing storage, defaulting to zero."""
+    storage_groups: Dict[str, str] = field(default_factory=dict)
+    """Inputs with the same label share one backing storage."""
+
     @property
     def torch_dtype(self) -> torch.dtype:
         return DTYPES[self.dtype]
@@ -113,10 +118,10 @@ class Workload:
         shape = self.shapes[name]
         strides = self.strides.get(name)
         if not strides:
-            return _prod(shape)
+            return self.storage_offsets.get(name, 0) + _prod(shape)
         if any(s == 0 for s in shape):
-            return 0
-        return 1 + sum((s - 1) * st for s, st in zip(shape, strides))
+            return self.storage_offsets.get(name, 0)
+        return self.storage_offsets.get(name, 0) + 1 + sum((s - 1) * st for s, st in zip(shape, strides))
 
     def input_bytes(self) -> int:
         """Bytes of every input's backing storage; the memory-fit estimate starts from this."""
@@ -137,14 +142,25 @@ class Workload:
                 return torch.randint(0, 1024, (n,), dtype=dtype, device=device, generator=gen)
             return torch.randn(n, dtype=dtype, device=device, generator=gen)
 
+        sizes, buffers = {}, {}
+        for name in self.shapes:
+            key = self.storage_groups.get(name, "input:" + name)
+            sizes[key] = max(sizes.get(key, 0), self.storage_numel(name))
         out: Dict[str, torch.Tensor] = {}
         for name, shape in self.shapes.items():
+            key = self.storage_groups.get(name, "input:" + name)
             dtype = self.dtype_of(name)
+            if key not in buffers:
+                buffers[key] = fill(sizes[key], dtype)
+            if buffers[key].dtype != dtype:
+                raise ValueError("shared storage groups require one dtype")
             strides = self.strides.get(name)
-            if not strides:
-                out[name] = fill(_prod(shape), dtype).reshape(tuple(shape))
-                continue
-            out[name] = fill(self.storage_numel(name), dtype).as_strided(tuple(shape), tuple(strides))
+            if strides is None:
+                strides, size = [], 1
+                for dim in reversed(shape):
+                    strides.insert(0, size)
+                    size *= max(1, dim)
+            out[name] = buffers[key].as_strided(tuple(shape), tuple(strides), self.storage_offsets.get(name, 0))
         return out
 
 
@@ -224,6 +240,8 @@ def spec_from_dict(data: Dict[str, Any]) -> Spec:
             strides={k: [int(x) for x in v] for k, v in (w.get("strides") or {}).items()},
             dtypes={k: str(v) for k, v in (w.get("dtypes") or {}).items()},
             grad_inputs=list(w["grad_inputs"]) if w.get("grad_inputs") is not None else None,
+            storage_offsets={k: int(v) for k, v in w.get("storage_offsets", {}).items()},
+            storage_groups=dict(w.get("storage_groups", {})),
             params={k: _coerce_param(v) for k, v in (w.get("params") or {}).items()},
         )
         for w in (data.get("workloads") or [])
@@ -314,8 +332,8 @@ def validate_spec(spec: Spec) -> List[str]:
     raw = spec.raw
     if not spec.op:
         errors.append("missing 'op'")
-    if raw.get("kda_spec") != SPEC_VERSION:
-        errors.append(f"'kda_spec' must be {SPEC_VERSION}")
+    if raw.get("kda_spec") not in (2, SPEC_VERSION):
+        errors.append(f"'kda_spec' must be 2 (legacy) or {SPEC_VERSION}")
     if not raw.get("common_version"):
         errors.append("missing 'common_version'")
     if spec.kernel_backend not in KERNEL_BACKENDS:
@@ -334,6 +352,26 @@ def validate_spec(spec: Spec) -> List[str]:
         errors.append(f"'backward' must be one of {BACKWARD_MODES}")
     if spec.backward == "eager" and not raw.get("backward_reason"):
         errors.append("'backward: eager' requires 'backward_reason'")
+    if raw.get("kda_spec") == 3:
+        for key in ("capability", "performance_policy"):
+            if key not in raw:
+                errors.append(f"v3 requires {key}")
+    if raw.get("performance_policy", "diagnostic") not in ("diagnostic", "strict_kernel"):
+        errors.append("invalid performance_policy")
+    capability = raw.get("capability", "training")
+    if capability in ("inference", "eager_grad") and spec.backward != {"inference": "none", "eager_grad": "eager"}[capability]:
+        errors.append("backward mode does not match capability")
+    if capability not in ("inference", "eager_grad", "training"):
+        errors.append("invalid capability")
+    if capability != "training" and spec.recompute.available:
+        errors.append("recompute requires training capability")
+    if capability == "inference" and any(w.needs_grad(n) for w in spec.workloads for n in w.shapes):
+        errors.append("inference capability requires grad_inputs: []")
+    for name, contract in raw.get("output_contracts", {}).items():
+        if not isinstance(contract, dict) or set(contract) - {"stride", "contiguous", "aliases", "storage_offset"}:
+            errors.append(f"unsupported output contract for {name}")
+    if raw.get("input_mutation", "forbidden") != "forbidden":
+        errors.append("this scaffold requires a non-mutating operation")
     if not spec.workloads:
         errors.append("no workloads")
     if spec.workloads and not spec.required_workloads:
@@ -353,6 +391,18 @@ def validate_spec(spec: Spec) -> List[str]:
                 errors.append(f"workload {w.name!r}: grad_inputs names non-float input {name!r}")
             if name not in w.shapes:
                 errors.append(f"workload {w.name!r}: grad_inputs names unknown input {name!r}")
+        for name, offset in w.storage_offsets.items():
+            if name not in w.shapes or offset < 0:
+                errors.append(f"{w.name}: invalid storage offset for {name}")
+        groups = {}
+        for name, group in w.storage_groups.items():
+            if name not in w.shapes or not isinstance(group, str) or not group:
+                errors.append(f"{w.name}: invalid storage group for {name}")
+            else:
+                dtype = w.dtype_of(name)
+                if group in groups and groups[group] != dtype:
+                    errors.append(f"{w.name}: mixed dtypes in storage group {group}")
+                groups[group] = dtype
         errors += _stride_errors(w)
         errors += _size_errors(w)
     if not any(w.source == "user" for w in spec.workloads):

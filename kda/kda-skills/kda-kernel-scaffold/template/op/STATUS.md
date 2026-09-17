@@ -4,16 +4,22 @@ Owned by the orchestrator. Resume from this file and current evidence, not chat 
 
 - [ ] M0 scaffold and eager sanity complete
 - [ ] M1 contract checked within authorized scope (or explicitly approved when requested)
-- [ ] M2 both backend correctness checks and lint pass
+- [ ] M2 capability-appropriate correctness checks and lint pass
 - [ ] M3 complete finalized verification -> `report.json.verification`
 - [ ] M4 tuning finished (pass, budget consumed, or correct best-so-far candidate)
 - [ ] M5 measured configs frozen and confirmed by post-freeze M3
-- [ ] M6 integration authorized, applied and recorded in E2E.md
+- [ ] M6 task acceptance ready; authorized integration applied and recorded in E2E.md
 
 | Field | Value |
 |---|---|
 | Created | {{date}} |
 | Kernel backend | {{kernel_backend}} |
+| Capability | {{capability}} |
+| Performance policy | diagnostic (strict_kernel only when explicitly selected) |
+| Integration contract | TODO change-set INTEGRATION.md |
+| Early integration | pending first correctness pass; before second tuning round |
+| Task experiment ledger | TODO matrix, limits, cumulative repair/tune/integration counts and decision per experiment |
+| Acceptance / manifest | pending final source and request evidence |
 | Compute pattern | TODO from SPEC |
 | Recompute | default off; record rationale and any user priority/configuration |
 | Authorization | TODO source, scope, review-only/stage-review constraints, integration permission |

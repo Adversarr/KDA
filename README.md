@@ -26,7 +26,7 @@ An agentic workflow can automatically diagnose and accelerate common deep learni
 
 ## Kernels (Level 1)
 
-> Status: v1.1 workflow (SPEC v2). Triton backend for token-wise ops, GEMM epilogues and
+> Status: v1.2 workflow (SPEC v3, runtime 0.7.0). Triton backend for token-wise ops, GEMM epilogues and
 > FlashAttention-2 (causal / block-causal / dense GQA); a TileLang backend is wired with tested
 > twins and is **experimental** (slower GEMM, long per-shape JIT). Reference measurements
 > are from A800; they are not performance guarantees for other environments.
@@ -36,6 +36,23 @@ Codex, pi) runs inside *your* repository to produce a fused kernel for a region 
 code, verify it against your own eager code, benchmark it against speed of light, and wire it
 in behind a flag. Generated kernels live in `<your repo>/kda_kernels/<op>/` and import nothing
 from KDA at runtime.
+
+New packages explicitly select `inference`, `eager_grad`, or `training`. Inference workloads
+normally select `eager_grad` to preserve the original API's gradient compatibility. Omitted
+scaffold capability retains the historical training template. Public dispatch defaults to
+auto; valid unsupported inputs use eager, explicit kernel selection is strict, and execution
+errors propagate. `KDA_BACKEND=eager` remains the global rollback.
+
+Operation correctness, real-path integration, performance and delivery have separate results.
+SOL and isolated baselines are diagnostic by default; `strict_kernel` retains explicit gates.
+A task uses one [integration contract](kda/kda-skills/kda-kernels/reference/integration-contract.md),
+tries the first correct candidate on the actual path before extended tuning, and validates final
+request A/B with all outputs and rank witnesses. An op pass alone cannot establish delivery.
+
+Existing packages keep running. Use `scaffold.py --dest <package> --check-upgrade` for a read-only
+migration inventory; `--sync-common` only refreshes the runtime. Merge custom runners explicitly
+and collect new evidence. Historical reports remain readable and never gain new acceptance.
+See [validation scope](kda/kda-skills/kda-kernels/reference/validation.md) for tested behavior and remaining limits. Development test suites and raw run artifacts are excluded from this public distribution.
 
 ### Install
 
@@ -88,11 +105,11 @@ implementer configuration requests broad filesystem access.
 |---|---|---|
 | M0 scaffold | `kda_kernels/<op>/` rendered from the template for one kernel backend; `_eager.py` is your code verbatim; `SPEC.md` gets your real shapes, strides and dtypes, the compute dtype with its provenance, the compute pattern, saved-for-backward and recompute decisions, roofline, hardware peaks | your agent, inline |
 | M1 contract checkpoint | agent checks SPEC against observed code and records its rationale; asks about unresolved semantics | your agent |
-| M2 implement | fused forward and backward from the reference snippets in the pattern's structure; `_run_dev.py --verify` and the mechanical lint pass | subagent |
+| M2 implement | capability-required forward, fake and optional backward; `_run_dev.py --verify` and mechanical lint pass | subagent |
 | M3 verify + bench | independent audit, lint, contract probe, numerics at fixed tolerances over the training, inference and recompute phases, timings vs eager and `torch.compile`, SOL efficiency; `report.json.verification` decision `pass` / `tune` / `fail` / `incomplete` (`fail` returns to M2 at most twice) | subagent |
-| M4 tune | at most 3 implement/verify iterations while the verdict is `tune` (SOL eff < 0.7 or slower than the baseline) | subagents |
+| M4 tune | at most 3 bounded hypotheses tied to the task decision; SOL gates apply only under explicit strict_kernel policy | subagents |
 | M5 freeze | autotuning removed, <= 4 frozen launch configs keyed by GPU, `TUNED.json`, re-verified | subagent |
-| M6 integrate | definition-site edit behind `KDA_BACKEND` (and `KDA_RECOMPUTE` when the op offers it, plus config fields), before/after smoke run, `E2E.md` | your agent, inline, within recorded integration authorization |
+| M6 integrate | real-path contract, rank/source/lifecycle evidence, balanced request A/B, separate acceptance and manifest; early probe follows first correctness pass and precedes the second tune round | your agent, inline, within recorded integration authorization |
 
 Kill switch at any time: `KDA_BACKEND=eager` or `backend="eager"` per call.
 

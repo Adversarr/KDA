@@ -42,25 +42,30 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import torch
 
 from .._common import VERSION
-from .._common.bench import attention_ms, bench_ms, compile_or_none, configure_compile_for_dev, copy_ms, matmul_ms, measurement_diagnostics, resolve_method
+from .._common.bench import attention_ms, bench_ms, measure, compile_or_none, configure_compile_for_dev, copy_ms, matmul_ms, measurement_diagnostics, resolve_method
 from .._common.compat import USE_CUSTOM_OP
 from .._common.gpu_info import GpuInfo, compute_ms, get_gpu_info, sol_ms
 from .._common.report import ALL_PHASES, RECOMPUTE_PHASE, WorkloadResult, write_report
 from .._common.evidence import finalize, output_paths, source_hashes
+from .._common.dependencies import operation_dependencies
 from .._common.spec import Spec, Workload, load_spec, validate_spec
 from .._common.verify import compare, grads, lowest_precision
+from .._common.inputs import UnsupportedLayout, check_workload, clone_inputs, tensor_metadata, unchanged, output_checks
 from . import _speed_of_light as sol
-from ._dispatch import dispatch
+from ._dispatch import dispatch, implementation
 from .backends import (
     BACKEND_DEFAULT,
     BACKEND_EAGER,
     BACKEND_KERNEL_FWD_ONLY,
     BACKENDS,
     KERNEL_BACKEND,
+    CAPABILITY,
     RECOMPUTE_AVAILABLE,
     RECOMPUTE_DEFAULT,
 )
-from .interface import {{op}}
+from .interface import {{op}}, call_explicit
+
+CACHE_POLICY = "cold"
 
 OP_DIR = Path(__file__).resolve().parent
 # Inputs, outputs, gradients, saved tensors and the baselines' copies: a conservative multiple
@@ -101,14 +106,13 @@ def _call(
     backend: str, tensors: Dict[str, torch.Tensor], params: Dict, recompute: Optional[bool] = None
 ) -> Tuple[torch.Tensor, ...]:
     extra = {} if recompute is None else {"recompute": recompute}
-    return tuple({{op}}(**tensors, **params, backend=backend, **extra))
+    return tuple(call_explicit(backend, **tensors, **params, **extra))
 
 
 def _leaves(w: Workload, tensors: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-    return {
-        k: v.detach().clone().requires_grad_(w.needs_grad(k) and v.is_floating_point())
-        for k, v in tensors.items()
-    }
+    result = clone_inputs(tensors, w.needs_grad)
+    check_workload(w, result)
+    return result
 
 
 def _compare(spec: Spec, w: Workload, actual: torch.Tensor, expected: torch.Tensor, reduced_over: int = 1) -> dict:
@@ -120,7 +124,14 @@ def _compare(spec: Spec, w: Workload, actual: torch.Tensor, expected: torch.Tens
 
 def _grad_outputs(outputs: Sequence[torch.Tensor], device: torch.device) -> List[torch.Tensor]:
     gen = torch.Generator(device=device).manual_seed(1)
-    return [torch.randn(o.shape, dtype=o.dtype, device=device, generator=gen) for o in outputs]
+    return [torch.randn(o.shape, dtype=o.dtype, device=device, generator=gen) if o.is_floating_point() or o.is_complex() else None for o in outputs]
+
+
+def _time(r, key, function, method, device):
+    """Retain actual measurement semantics before exposing the legacy median."""
+    result = measure(function, method=method, device=device, cache_policy=CACHE_POLICY)
+    r.measurements[key] = result
+    r.time_ms[key] = result["median_ms"]
 
 
 def _bench_phase(
@@ -136,21 +147,20 @@ def _bench_phase(
     names = list(base)
     plain = [base[k].detach() for k in names]
     with torch.no_grad():
-        r.time_ms[f"{label}_infer"] = bench_ms(lambda: fwd(*plain), method=method, device=device)
+        _time(r, f"{label}_infer", lambda: fwd(*plain), method, device)
 
     leaves = _leaves(w, base)
     wrt = [leaves[k] for k in names if leaves[k].requires_grad]
     if not wrt:
         r.time_ms[f"{label}_fwd"] = r.time_ms[f"{label}_infer"]
+        r.measurements[f"{label}_fwd"] = dict(r.measurements[f"{label}_infer"], alias_of=f"{label}_infer")
         return
     args = [leaves[k] for k in names]
     # Training forward: grad mode on and leaves requiring grad, so the kernel writes its aux.
-    r.time_ms[f"{label}_fwd"] = bench_ms(lambda: fwd(*args), method=method, device=device)
+    _time(r, f"{label}_fwd", lambda: fwd(*args), method, device)
     outputs = fwd(*args)
     gouts = _grad_outputs(outputs, device)
-    r.time_ms[f"{label}_bwd"] = bench_ms(
-        lambda: torch.autograd.grad(outputs, wrt, gouts, retain_graph=True), method=method, device=device
-    )
+    _time(r, f"{label}_bwd", lambda: grads(outputs, wrt, gouts), method, device)
 
 
 def _bench_recompute(
@@ -169,9 +179,7 @@ def _bench_recompute(
         return
     outputs = fwd_rc(*[leaves[k] for k in names])
     gouts = _grad_outputs(outputs, device)
-    r.time_ms[f"kernel_{RECOMPUTE_PHASE}"] = bench_ms(
-        lambda: torch.autograd.grad(outputs, wrt, gouts, retain_graph=True), method=method, device=device
-    )
+    _time(r, f"kernel_{RECOMPUTE_PHASE}", lambda: grads(outputs, wrt, gouts), method, device)
 
 
 def _compare_grads(
@@ -180,10 +188,9 @@ def _compare_grads(
     out: Dict[str, dict] = {}
     largest_output = max(o.numel() for o in ref_out)
     for name, e, k in zip(grad_names, ref_g, ker_g):
-        if e is None and k is None:
+        if e is None or k is None:
+            out[name] = {"passed": e is None and k is None, "expected_none": e is None, "actual_none": k is None}
             continue
-        e = torch.zeros_like(k) if e is None else e
-        k = torch.zeros_like(e) if k is None else k
         # A gradient smaller than the output was reduced over ~(output / grad) rows.
         reduced_over = max(1, largest_output // max(1, e.numel()))
         out[name] = _compare(spec, w, k, e, reduced_over=reduced_over)
@@ -200,6 +207,7 @@ def _compile_probe(
     grad_names: List[str],
     spec: Spec,
     device: torch.device,
+    ref_inputs: Dict[str, torch.Tensor],
 ) -> None:
     """``torch.compile(fullgraph=True)`` forward and backward through the backend.
 
@@ -216,13 +224,18 @@ def _compile_probe(
     configure_compile_for_dev()  # caches off: a stale artefact from an older fake would be reused
     try:
         out = torch.compile(fn, fullgraph=True)(*[leaves[k] for k in names])
+        if len(out) != len(ref_out):
+            raise ValueError("compiled output count differs")
         r.compile = {f"out{i}": _compare(spec, w, k, e) for i, (k, e) in enumerate(zip(out, ref_out))}
+        r.compile.update(output_checks(out, ref_out, leaves, ref_inputs, spec.raw.get("output_contracts", {})))
+        if not unchanged(base, leaves):
+            raise ValueError("compiled path mutated its inputs")
         if grad_names:
             ker_g = grads(out, [leaves[k] for k in grad_names], _grad_outputs(ref_out, device))
             r.compile.update(_compare_grads(spec, w, grad_names, ker_g, ref_g, ref_out))
     except Exception as exc:  # noqa: BLE001 - recorded as the verdict reason
         first_line = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
-        r.compile_error = f"{type(exc).__name__}: {first_line[:300]}"
+        r.compile_error = f"{type(exc).__name__}: {str(exc)[:4000]}"
     finally:
         torch._dynamo.reset()
 
@@ -261,20 +274,34 @@ def run_workload(
     measuring = False
     try:
         base = make_inputs(w, device)
+        entry = implementation(backend)
+        r.execution = {"requested_backend": backend, "actual_backend": backend,
+                       "callable": entry.__module__ + "." + entry.__qualname__,
+                       "inputs": check_workload(w, base), "capability": CAPABILITY,
+                       "independent_backward": CAPABILITY == "training",
+                       "gradient_verification": "eager_adjoint_compatibility" if CAPABILITY == "eager_grad" else CAPABILITY}
         ref_in, ker_in = _leaves(w, base), _leaves(w, base)
         ref_out = _call(BACKEND_EAGER, ref_in, w.params)
         ker_out = _call(backend, ker_in, w.params)
         if len(ref_out) != len(ker_out):
             raise RuntimeError(f"backend returned {len(ker_out)} outputs, reference {len(ref_out)}")
         r.fwd = {f"out{i}": _compare(spec, w, k, e) for i, (k, e) in enumerate(zip(ker_out, ref_out))}
+        if not unchanged(base, ref_in) or not unchanged(base, ker_in):
+            raise ValueError("an implementation mutated its inputs")
+        r.fwd.update(output_checks(ker_out, ref_out, ker_in, ref_in, spec.raw.get("output_contracts", {})))
         # Inference path: under no_grad the kernel skips its saved-for-backward stores
         # (``save_aux=False``); the user-visible outputs must be identical.
         with torch.no_grad():
-            inf_out = _call(backend, {k: v.detach() for k, v in base.items()}, w.params)
+            inf_in = clone_inputs(base)
+            check_workload(w, inf_in)
+            inf_out = _call(backend, inf_in, w.params)
+            if not unchanged(base, inf_in):
+                raise ValueError("inference mutated its inputs")
         if len(inf_out) != len(ref_out):
             raise RuntimeError("inference output count differs from the reference")
         r.infer = {f"out{i}": _compare(spec, w, k, e) for i, (k, e) in enumerate(zip(inf_out, ref_out))}
 
+        r.infer.update(output_checks(inf_out, ref_out, inf_in, ref_in, spec.raw.get("output_contracts", {})))
         grad_names = [k for k in base if ref_in[k].requires_grad]
         ref_g: Sequence = []
         ker_g: Sequence = []
@@ -293,12 +320,15 @@ def run_workload(
             if len(rc_out) != len(ref_out):
                 raise RuntimeError("recompute output count differs from the reference")
             r.bwd_recompute = {f"out{i}": _compare(spec, w, k, e) for i, (k, e) in enumerate(zip(rc_out, ref_out))}
+            r.bwd_recompute.update(output_checks(rc_out, ref_out, rc_in, ref_in, spec.raw.get("output_contracts", {})))
+            if not unchanged(base, rc_in):
+                raise ValueError("recompute mutated inputs")
             if grad_names:
                 rc_g = grads(rc_out, [rc_in[k] for k in grad_names], _grad_outputs(ref_out, device))
                 r.bwd_recompute.update(_compare_grads(spec, w, grad_names, rc_g, ref_g, ref_out))
 
         if probe_compile:
-            _compile_probe(r, w, backend, base, ref_out, ref_g, grad_names, spec, device)
+            _compile_probe(r, w, backend, base, ref_out, ref_g, grad_names, spec, device, ref_in)
 
         # The verification tensors (two sets of leaves with their graphs, outputs, grads) are
         # ~15x the inputs on a 2^31-element row; the bench needs only `base`. Free them first.
@@ -348,29 +378,40 @@ def run_workload(
                         r.roof_details[phase] = {"method": "attention", "available": False,
                                                  "reason": "attention byte/FLOP estimate is not implemented"}
                     continue
+                measured = r.measurements.get(f"kernel_{phase}", {})
+                if CACHE_POLICY != "cold" or measured.get("method") != "profiler":
+                    r.roof_details[phase] = {"available": False, "reason": "roof requires cold profiler measurements"}
+                    r.sol_ms[phase] = r.roof_ms[phase] = None
+                    continue
                 r.sol_ms[phase] = sol_ms(nbytes, flops, info, roof=sol.ROOF)
                 # Achievable roof: a same-size copy (memory) vs the compute roof, whichever is
                 # slower. On tensor cores the compute roof is cuBLAS on the phase's GEMMs
                 # (`gemm_shapes` when the roofline names them, a same-FLOP cube otherwise), not
                 # the datasheet peak nothing reaches; on CUDA cores it stays the datasheet number.
-                copy = copy_ms(nbytes, method=method, device=device)
+                copy_record = copy_ms(nbytes, method="profiler", device=device, structured=True)
+                copy = copy_record["median_ms"]
                 if getattr(sol, "ROOF_METHOD", "auto") == "attention":
                     try:
                         descriptor = sol.attention_work(phase, **base, **w.params)
                         detail = attention_ms(phase, **descriptor, dtype=w.torch_dtype,
-                                              method=method, device=device)
+                                              method="profiler", device=device)
                     except (NotImplementedError, AttributeError, ValueError, TypeError) as exc:
                         detail = {"method": "attention", "available": False,
                                   "roof_ms": None, "reason": f"{type(exc).__name__}: {exc}"}
-                    r.roof_details[phase] = dict(detail, copy_ms=copy)
+                    r.roof_details[phase] = dict(detail, copy_ms=copy, copy_measurement=copy_record)
                     r.roof_ms[phase] = max(copy, detail["roof_ms"]) if detail["available"] else None
                     continue
                 if TENSOR_CORE_ROOF:
                     shapes = _gemm_shapes(phase, base, w.params)
-                    compute = matmul_ms(flops, shapes=shapes, dtype=w.torch_dtype, method=method, device=device)
+                    compute_record = matmul_ms(flops, shapes=shapes, dtype=w.torch_dtype, method="profiler", device=device, structured=True)
+                    compute = compute_record["roof_ms"] if compute_record else None
                 else:
                     compute = compute_ms(flops, info, roof=sol.ROOF)
+                    compute_record = {"method": "datasheet", "roof_ms": compute, "flops": flops, "unit": sol.ROOF}
+                r.roof_details[phase] = {"method": "max_copy_compute_proxy", "copy_measurement": copy_record, "compute": compute_record}
                 r.roof_ms[phase] = copy if compute is None else max(copy, compute)
+    except UnsupportedLayout as exc:
+        r.skipped = str(exc)
     except torch.cuda.OutOfMemoryError as exc:
         # The 6x-inputs estimate is a floor: an fp32-upcast eager reference of a 2^31-element
         # norm holds ~10 temporaries of 8 GiB, and a shared card has less free memory than the
@@ -452,12 +493,60 @@ def contract_probe(w: Workload, backend: str, device: torch.device, row_inputs: 
     return rows
 
 
+
+def adapter_probe(w, device, spec):
+    """Test public selection and fallback independently of the numerical oracle path."""
+    import os
+    from unittest.mock import patch
+    from . import interface as api
+    rows = {}
+    base = make_inputs(w, device)
+    original = api.call_explicit
+    selected = []
+    def observe(backend, *args, **kwargs):
+        selected.append(backend)
+        return original(backend, *args, **kwargs)
+    def check(label, setting, tensors, expected, explicit=None):
+        selected.clear()
+        with patch.dict(os.environ, {"KDA_BACKEND": setting}), patch.object(api, "call_explicit", side_effect=observe):
+            outputs = tuple({{op}}(**tensors, **w.params, backend=explicit))
+        reference = _call(BACKEND_EAGER, tensors, w.params)
+        passed = (selected == [expected] and len(outputs) == len(reference)
+                  and all(_compare(spec, w, a, b)["passed"] for a, b in zip(outputs, reference)))
+        rows[label] = {"expect": expected, "passed": passed, "detail": f"selected={selected}"}
+    check("public_env_eager", "eager", clone_inputs(base), "eager", KERNEL_BACKEND)
+    check("public_env_kernel", KERNEL_BACKEND, clone_inputs(base), KERNEL_BACKEND, "eager")
+    check("public_auto_supported", "auto", clone_inputs(base), KERNEL_BACKEND)
+    check("public_auto_unsupported", "auto", w.make_inputs(torch.device("cpu")), "eager")
+    saved_default = api._default_backend
+    try:
+        with patch.dict(os.environ):
+            os.environ.pop("KDA_BACKEND", None)
+            api.set_default_backend("eager")
+            selected.clear()
+            with patch.object(api, "call_explicit", side_effect=observe):
+                {{op}}(**clone_inputs(base), **w.params)
+            rows["public_config"] = {"expect": "eager", "passed": selected == ["eager"], "detail": str(selected)}
+    finally:
+        api.set_default_backend(saved_default)
+    with patch.dict(os.environ, {"KDA_BACKEND": "auto"}), patch.object(api, "dispatch", side_effect=RuntimeError("injected adapter failure")):
+        try:
+            {{op}}(**clone_inputs(base), **w.params)
+        except RuntimeError as exc:
+            passed = str(exc) == "injected adapter failure"
+        else:
+            passed = False
+        rows["public_execution_error"] = {"expect": "propagate", "passed": passed, "detail": "declared supported path must preserve exceptions"}
+    return rows
+
 # ---------------------------------------------------------------- main
 
 
 def _consistency_errors(spec: Spec) -> List[str]:
     """SPEC.md and backends.py must agree on the kernel backend and the recompute policy."""
     errors = []
+    if spec.raw.get("capability", "training") != CAPABILITY:
+        errors.append("SPEC and generated capability differ")
     if spec.kernel_backend != KERNEL_BACKEND:
         errors.append(f"SPEC kernel_backend {spec.kernel_backend!r} != backends.KERNEL_BACKEND {KERNEL_BACKEND!r}")
     if spec.recompute.available != RECOMPUTE_AVAILABLE:
@@ -479,7 +568,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--verify", action="store_true", help="accepted for readability; verification always runs")
     p.add_argument("--bench", action="store_true", help="also time eager / compiled / kernel per phase and compute SOL")
-    p.add_argument("--backend", default=BACKEND_DEFAULT, choices=BACKENDS)
+    p.add_argument("--backend", default=KERNEL_BACKEND, choices=tuple(b for b in BACKENDS if b != "auto"))
     p.add_argument("--workload", action="append", help="run only these workload names (repeatable)")
     p.add_argument("--method", default="auto", choices=("auto", "profiler", "events"), help="timing method")
     p.add_argument("--device", default="cuda")
@@ -494,7 +583,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         action="store_true",
         help="skip the torch.compile(fullgraph=True) probe of the first user workload (custom-op torch only)",
     )
+    p.add_argument("--performance-policy", choices=("diagnostic", "strict_kernel"))
+    p.add_argument("--cache-policy", choices=("cold", "warm", "context"), default="cold")
     args = p.parse_args(argv)
+    global CACHE_POLICY
+    CACHE_POLICY = args.cache_policy
+    if CACHE_POLICY == "context":
+        p.error("context measurements require a real region/request driver using measure(context=...)")
     try:
         args.json, args.md = output_paths(OP_DIR, bool(args.workload), args.json, args.md)
         if args.finalize_audit:
@@ -510,6 +605,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     spec = load_spec(OP_DIR / "SPEC.md")
     errors = validate_spec(spec) + _consistency_errors(spec)
+    if spec.raw.get("kda_spec") != 3:
+        errors.append("new runner evidence requires explicit SPEC v3 upgrade; legacy runners remain supported")
     if errors:
         print("SPEC.md is invalid:\n  - " + "\n  - ".join(errors), file=sys.stderr)
         return 2
@@ -519,6 +616,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"unknown workload selection: {args.workload}", file=sys.stderr)
         return 2
     hashes_before = source_hashes(OP_DIR)
+    dependencies_before = operation_dependencies(OP_DIR)
     device = torch.device(args.device)
     if device.index is None:
         device = torch.device("cuda", torch.cuda.current_device())
@@ -543,6 +641,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not target.skipped:
             try:
                 target.contract = contract_probe(users[0], args.backend, device, spec.row_inputs)
+                if args.backend == KERNEL_BACKEND:
+                    target.contract.update(adapter_probe(users[0], device, spec))
             except Exception as exc:  # noqa: BLE001 - a broken probe must not hide the run
                 target.contract = {"probe": {"expect": "return", "passed": False, "detail": f"{type(exc).__name__}: {exc}"}}
 
@@ -553,7 +653,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "kernel_backend": KERNEL_BACKEND,
         "kernel_backend_version": _kernel_backend_version(),
         "common_version": VERSION,
-        "bench_method": resolve_method(args.method, device) if args.bench else None,  # resolved, never "auto"
+        "bench_method": (next(iter({m["method"] for row in results for m in row.measurements.values()})) if len({m["method"] for row in results for m in row.measurements.values()}) == 1 else "mixed") if args.bench else None,
+        "cache_policy": CACHE_POLICY,
         "peaks": info.as_dict(),
         "measurement_diagnostics": measurement_diagnostics(),
     }
@@ -586,9 +687,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         source_hashes=hashes_before,
         gate_recompute=spec.recompute.default,
         kernel_backend=KERNEL_BACKEND,
-        # An explicit --method events run is a host-overhead diagnostic: its times include launch
-        # overhead, so SOL/baseline do not gate it (auto resolving to events on a CUPTI-less machine still gates).
-        gate_perf=args.method != "events",
+        performance_policy=args.performance_policy or spec.raw.get("performance_policy", "diagnostic"),
+        dependencies=dependencies_before,
+        capability=CAPABILITY,
+        invocation={"command": [sys.executable, *sys.argv], "rank": 0, "device": str(device)},
     )
 
     print(f"[{spec.op}/{args.backend}] verdict: {report['verdict']}")

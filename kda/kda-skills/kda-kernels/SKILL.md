@@ -71,7 +71,7 @@ Record the authorization source and scope in STATUS (and PLAN for whole-model wo
 within that scope. Silence is not approval. Ask about missing model-level intent or a material
 change to semantics, numerical requirements, configuration or scope; complete independent
 work first. Recompute defaults off unless existing configuration or user priorities justify
-another choice. A correct candidate with unmet performance gates remains `tune`; disclose
+another choice. Under strict_kernel a correct candidate with unmet performance gates remains `tune`; disclose
 that limitation at integration review. Prior authorization to integrate a passing result does
 not imply acceptance of an unmet gate.
 
@@ -103,8 +103,8 @@ not imply acceptance of an unmet gate.
 
 Completion: the target workload, execution command, region boundary, objective and allowed
 changes are known from evidence or the smallest unresolved question is stated. For a whole
-model, run candidates one at a time; re-profile after integration and stop when the next
-estimated gain is below 2% of the step or the user's budget is exhausted. Record useful
+model, run candidates one at a time; re-profile after integration and stop when the task's
+declared benefit threshold or experiment budget says to stop. Record useful
 non-kernel findings without silently expanding into architecture or training-policy changes.
 
 ## 2. Stage ownership and dispatch
@@ -112,11 +112,11 @@ non-kernel findings without silently expanding into architecture or training-pol
 | Stage | Owner | Source responsibility | Completion evidence |
 |---|---|---|---|
 | M0/M1 | orchestrator, `kda-kernel-scaffold` | SPEC, eager reference, interface, harness, roof | checked SPEC and eager sanity |
-| M2 | implementer, mode `implement` | selected backend, helpers, implementation notes | both backend verifies and lint |
+| M2 | implementer, mode `implement` | selected backend, helpers, implementation notes | capability-required verification and lint |
 | M3 | verifier, `kda-kernel-verify-and-bench` | audits; source remains unchanged | finalized `report.json.verification` |
 | M4 | implementer, mode `tune` | one measured hypothesis | diagnostic reports, keep/revert decision |
-| M5 | implementer, mode `freeze` | measured configs, TUNED | both verifies/lint, then M3 confirmation |
-| M6 | orchestrator, `kda-kernel-integrate` | authorized user-code change set | before/after smoke and E2E.md |
+| M5 | implementer, mode `freeze` | measured configs, TUNED | capability-required verification/lint, then M3 confirmation |
+| M6 | orchestrator, `kda-kernel-integrate` | authorized user-code change set | real-path/rank/lifecycle evidence, request A/B, acceptance and manifest |
 
 Use sequential workers when available; read [agent handoffs](reference/agent-handoffs.md)
 for the actual harness. Wait for completion before dependent stages and inspect the evidence
@@ -152,9 +152,17 @@ then record M1 as internally checked within authorized scope (or explicitly user
 when requested). A semantic disagreement is resolved against the user's code and intent;
 loosening a numerical requirement needs a user decision. Do not implement contradictory math.
 
-**M2:** dispatch implementation, run 1. Tick only when `report.verify.json` and
-`report.fwd_only.json` both pass required coverage and lint has no hard finding. Performance
+**M2:** dispatch implementation, run 1. Tick only when `report.verify.json` passes required
+capability coverage and lint has no hard finding; training additionally requires
+`report.fwd_only.json`. An eager_grad compatibility alias is not independent verification. Performance
 is pending M3; the implementer does not write the canonical timed record in this mode.
+
+**Early integration experiment:** after a minimal correct M2 candidate and before a second
+M4 tuning round, follow [the integration contract](reference/integration-contract.md).
+Use isolated physical source snapshots and the actual entrypoint/process topology. Check
+per-rank execution, consumers, fallback and success/failure cleanup, then measure benefit
+direction. This experimental splice stays within optimization scope; production integration
+still follows recorded authorization. Simple single-op work uses the same minimal record.
 
 **M3:** follow the verifier and [evidence protocol](reference/evidence.md). Read the finalized
 `verification.verdict` yourself; missing finalization, legacy coverage or stale source hashes
@@ -178,7 +186,7 @@ Do not spend a tuning round on a harness error, incorrect byte count or host-onl
 An observed structural limit may justify stopping early; it does not waive a machine gate.
 
 **M5:** freeze a passed or correct best-so-far candidate, carrying its record into dispatch.
-Only measured configs may be frozen; both verifies and lint run before the worker returns.
+Only measured configs may be frozen; capability-required verification and lint run before the worker returns.
 Dispatch M3 on the same new run number. Tick M5 only after finalized evidence reproduces the
 candidate without new numerical/contract failures or required baseline regressions. Timing
 within the existing noise band is handled by the evidence protocol; a gate that flips is
@@ -196,3 +204,10 @@ Report measured execution time, verification outcome, affected files, fallback a
 limitations. Link SPEC and reports for technical details. A proposed optimization with no
 measured benefit is reported honestly rather than recommended for integration. For a whole
 model, update PLAN and remaining estimates after each integrated candidate.
+
+## Task acceptance
+
+Use [scoped acceptance](reference/acceptance.md). New SPEC performance policy is diagnostic;
+the legacy tune edges and near-gate reruns apply only to explicit strict_kernel. Correctness
+and integration gaps still block delivery. Maintain task-wide counters and a finite experiment
+matrix alongside per-op budgets; an extra experiment must name the decision it changes.

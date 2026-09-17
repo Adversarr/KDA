@@ -79,7 +79,7 @@ def compare(
     atol = (default_atol if atol is None else atol) * math.sqrt(max(1, reduced_over))
     rtol = default_rtol if rtol is None else rtol
 
-    if actual.shape != expected.shape:
+    if actual.shape != expected.shape or actual.dtype != expected.dtype or actual.device != expected.device:
         return CompareResult(float("inf"), float("inf"), atol, rtol, reduced_over, expected.numel(), expected.numel(), False)
 
     # Chunked over the flattened tensors: the fp64 upcast of both sides plus the diff and mask
@@ -111,7 +111,10 @@ def grads(
     wrt = [t for t in inputs if t.requires_grad]
     if not wrt:
         return [None] * len(inputs)
-    got = iter(torch.autograd.grad(outputs, wrt, grad_outputs, allow_unused=True, retain_graph=True))
+    pairs = [(o, g) for o, g in zip(outputs, grad_outputs) if o.requires_grad and g is not None]
+    values = torch.autograd.grad([o for o, _ in pairs], wrt, [g for _, g in pairs],
+                                 allow_unused=True, retain_graph=True) if pairs else [None] * len(wrt)
+    got = iter(values)
     return [next(got) if t.requires_grad else None for t in inputs]
 
 

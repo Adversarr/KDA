@@ -1,8 +1,8 @@
 """Kernel timing: CUPTI-backed via ``torch.profiler`` when available, CUDA events otherwise.
 
-Both methods flush L2 before every iteration so a small working set is not served from
-cache, and both report the median per-call time in milliseconds. The profiler method sums
-only device kernel time, so host launch overhead is excluded; the events method includes it.
+Cold policy flushes L2 before every iteration; warm/context policies retain cache state.
+Structured results preserve every sample and the median in milliseconds. Profiler sums device activity durations; CUDA events measure a stream interval.
+Neither their difference nor either metric alone establishes CPU overhead.
 """
 
 from __future__ import annotations
@@ -33,13 +33,14 @@ def _current_device(device: Optional[torch.device]) -> torch.device:
     return torch.device(device)
 
 
-def _bench_events(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device) -> List[float]:
+def _bench_events(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device, cache_policy="cold") -> List[float]:
     for _ in range(warmup):
         fn()
     torch.cuda.synchronize(device)
     times = []
     for _ in range(iters):
-        _flush_l2(device)
+        if cache_policy == "cold":
+            _flush_l2(device)
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
@@ -122,6 +123,9 @@ def _raw_profiler_samples(events, iters: int):
         counts.append(len(durations))
     if len(spans) != iters:
         invalid.append("unexpected annotation count")
+    ordered_spans = sorted(spans.values())
+    if any(left[1] > right[0] for left, right in zip(ordered_spans, ordered_spans[1:])):
+        invalid.append("nested or overlapping measurement iteration boundaries")
     if any(not math.isfinite(t) or t <= 0 for t in times):
         invalid.append("missing positive finite device timing for an iteration")
     if len(set(counts)) > 1:
@@ -155,7 +159,7 @@ def _raw_cuda_sample(events):
     return sum(durations) / 1e6, len(durations)
 
 
-def _bench_profiler_cuda_only(fn, warmup, iters, device):
+def _bench_profiler_cuda_only(fn, warmup, iters, device, cache_policy="cold"):
     from torch.profiler import ProfilerActivity, profile
 
     if iters <= 0:
@@ -167,7 +171,8 @@ def _bench_profiler_cuda_only(fn, warmup, iters, device):
     samples, counts = [], []
     for _ in range(iters):
         # Flush before opening the trace, so only this complete callable is timed.
-        _flush_l2(device)
+        if cache_policy == "cold":
+            _flush_l2(device)
         torch.cuda.synchronize(device)
         with profile(activities=[ProfilerActivity.CUDA]) as prof:
             fn()
@@ -189,12 +194,12 @@ def _bench_profiler_cuda_only(fn, warmup, iters, device):
     return samples
 
 
-def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device) -> List[float]:
+def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torch.device, cache_policy="cold") -> List[float]:
     from torch.profiler import ProfilerActivity, profile, record_function
 
     activity_mode = os.environ.get("KDA_PROFILER_ACTIVITIES", "cpu_cuda")
     if activity_mode == "cuda":
-        return _bench_profiler_cuda_only(fn, warmup, iters, device)
+        return _bench_profiler_cuda_only(fn, warmup, iters, device, cache_policy)
     if activity_mode != "cpu_cuda":
         raise ValueError("KDA_PROFILER_ACTIVITIES must be cpu_cuda or cuda")
 
@@ -210,13 +215,15 @@ def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torc
         # Kineto can omit the first launch group after a fresh profile starts.
         # These unmeasured calls precede per-iteration cache flushes and markers.
         for _ in range(max(3, warmup)):
-            _flush_l2(device)
+            if cache_policy == "cold":
+                _flush_l2(device)
             torch.cuda.synchronize(device)
             with record_function("kda_profiler_warmup"):
                 fn()
                 torch.cuda.synchronize(device)
         for i in range(iters):
-            _flush_l2(device)
+            if cache_policy == "cold":
+                _flush_l2(device)
             torch.cuda.synchronize(device)
             with record_function(f"{_MARK}{i}"):
                 fn()
@@ -250,14 +257,15 @@ def _bench_profiler(fn: Callable[[], Any], warmup: int, iters: int, device: torc
         raise
 
 
-def bench_ms(
+def _collect(
     fn: Callable[[], Any],
     *,
     warmup: int = 5,
     iters: int = 20,
     method: str = "auto",
     device: Optional[torch.device] = None,
-) -> float:
+    cache_policy: str = "cold",
+):
     """Median time per ``fn()`` call in ms. ``method`` is ``auto`` | ``profiler`` | ``events``."""
     device = _current_device(device)
     times: List[float] = []
@@ -265,7 +273,7 @@ def bench_ms(
         retry_record = None
         for attempt in range(2):
             try:
-                times = _bench_profiler(fn, warmup, iters, device)
+                times = _bench_profiler(fn, warmup, iters, device, cache_policy)
                 if len(times) != iters or any(not math.isfinite(t) or t <= 0 for t in times):
                     raise _IncompleteProfilerTrace({"reason": "incomplete profiler samples",
                         "samples_ms": [t if math.isfinite(t) else None for t in times]})
@@ -287,17 +295,60 @@ def bench_ms(
             except Exception:
                 if retry_record is not None:
                     retry_record["outcome"] = "retry_runtime_error"
-                if method == "profiler":
-                    raise
-                if retry_record is not None:
-                    retry_record["fallback"] = "events"
-                break
+                raise
             else:
                 if retry_record is not None:
                     retry_record["outcome"] = "retry_succeeded"
-                return statistics.median(times)
+                return times, "profiler"
 
-    return statistics.median(_bench_events(fn, warmup, iters, device))
+    return _bench_events(fn, warmup, iters, device, cache_policy), "events"
+
+
+def measure(fn, *, warmup=5, iters=20, method="profiler", device=None,
+            cache_policy="cold", context=None):
+    """Measure a callable and retain actual timing semantics and raw samples.
+
+    Context measurements require a driver-supplied producer/consumer description.
+    Wall measurements synchronize CUDA at both boundaries and include the callable.
+    """
+    if cache_policy not in ("cold", "warm", "context") or method not in ("auto", "profiler", "events", "wall"):
+        raise ValueError("invalid measurement policy")
+    if iters < 1 or warmup < 0:
+        raise ValueError("invalid sample counts")
+    if cache_policy == "context" and (not isinstance(context, dict) or not all(context.get(k) for k in ("producer", "consumer", "configuration"))):
+        raise ValueError("context timing requires producer, consumer and configuration")
+    device = _current_device(device)
+    if method == "wall":
+        for _ in range(warmup):
+            fn()
+        samples = []
+        for _ in range(iters):
+            if cache_policy == "cold":
+                _flush_l2(device)
+            torch.cuda.synchronize(device)
+            start = time.perf_counter()
+            fn()
+            torch.cuda.synchronize(device)
+            samples.append((time.perf_counter() - start) * 1000)
+        actual = "wall"
+    else:
+        samples, actual = _collect(fn, warmup=warmup, iters=iters, method=method,
+                                   device=device, cache_policy=cache_policy)
+    if len(samples) != iters or any(not math.isfinite(v) or v <= 0 for v in samples):
+        raise _IncompleteProfilerTrace({"reason": "invalid or missing measurement samples"})
+    return {"metric": {"profiler": "device_activity_sum_ms", "events": "stream_elapsed_ms", "wall": "region_wall_ms"}[actual],
+            "method": actual, "requested_method": method, "unit": "ms",
+            "samples_ms": samples, "median_ms": statistics.median(samples),
+            "warmup": warmup, "cache_policy": cache_policy, "context": context,
+            "order": list(range(iters)), "device": str(device),
+            "stream": int(torch.cuda.current_stream(device).cuda_stream),
+            "synchronization": "current stream event boundaries" if actual == "events" else "device synchronized at callable boundaries",
+            "scope": "callable", "status": "complete"}
+
+
+def bench_ms(fn, *, warmup=5, iters=20, method="auto", device=None):
+    """Return a cold-cache median for legacy callers."""
+    return measure(fn, warmup=warmup, iters=iters, method=method, device=device)["median_ms"]
 
 
 def resolve_method(method: str = "auto", device: Optional[torch.device] = None) -> str:
@@ -316,7 +367,7 @@ def resolve_method(method: str = "auto", device: Optional[torch.device] = None) 
         return "events"
 
 
-def copy_ms(nbytes: float, *, method: str = "auto", device: Optional[torch.device] = None) -> float:
+def copy_ms(nbytes: float, *, method: str = "auto", device: Optional[torch.device] = None, structured=False):
     """Time of a plain device copy moving ``nbytes`` in total (read + write).
 
     This is the achievable memory roof at that transfer size: HBM peak is approached only
@@ -327,7 +378,8 @@ def copy_ms(nbytes: float, *, method: str = "auto", device: Optional[torch.devic
     n = max(1, int(nbytes // 2))
     src = torch.empty(n, dtype=torch.uint8, device=device)
     dst = torch.empty(n, dtype=torch.uint8, device=device)
-    return bench_ms(lambda: dst.copy_(src), method=method, device=device)
+    result = measure(lambda: dst.copy_(src), method=method, device=device)
+    return result if structured else result["median_ms"]
 
 
 _FP32_CACHE: Dict[tuple, dict] = {}
@@ -358,7 +410,7 @@ def fp32_ms(flops: float, *, method: str = "profiler", device=None) -> dict:
                                 method=method, device=device) for _ in range(3)]
         finally:
             torch.set_float32_matmul_precision(precision)
-        tflops = 2 * n ** 3 / (min(samples) * 1e9)
+        tflops = 2 * n ** 3 / (statistics.median(samples) * 1e9)
         _FP32_CACHE[key] = dict(method="fp32_sgemm_throughput", available=True,
             device=torch.cuda.get_device_name(device), shape=[n, n, n],
             precision="highest", tf32=False, samples_ms=samples, tflops=tflops,
@@ -370,6 +422,7 @@ def matmul_ms(
     flops: float,
     *,
     shapes: Optional[Sequence[Tuple[int, int, int]]] = None,
+    structured: bool = False,
     dtype: torch.dtype = torch.bfloat16,
     method: str = "auto",
     device: Optional[torch.device] = None,
@@ -395,12 +448,15 @@ def matmul_ms(
         n = (n + 15) // 16 * 16
         shapes = [(n, n, n)]
     total = 0.0
+    measurements = []
     for m, n, k in shapes:
         a = torch.empty(int(m), int(k), dtype=dtype, device=device)
         b = torch.empty(int(n), int(k), dtype=dtype, device=device)
-        total += bench_ms(lambda: torch.matmul(a, b.t()), method=method, device=device)
+        result = measure(lambda: torch.matmul(a, b.t()), method=method, device=device)
+        measurements.append(dict(result, shape=[m, n, k]))
+        total += result["median_ms"]
         del a, b
-    return total
+    return {"method": "sum_gemm_proxy", "roof_ms": total, "measurements": measurements} if structured else total
 
 
 
@@ -436,7 +492,7 @@ def _attention_samples(q_shape, k_shape, v_shape, dtype, method, device):
             samples = {phase: [] for phase in closures}
             for _ in range(3):
                 for phase, fn in closures.items():
-                    samples[phase].append(bench_ms(fn, warmup=3, iters=10,
+                    samples[phase].append(measure(fn, warmup=3, iters=10,
                                                    method=method, device=device))
     return samples
 
@@ -503,17 +559,18 @@ def attention_ms(
         samples = _ATTENTION_CACHE.get(key)
         if samples is None:
             samples = _attention_samples(q_shape, k_shape, v_shape, dtype, resolved_method, device)
-            if any(len(samples[p]) != 3 or any(not math.isfinite(t) or t <= 0 for t in samples[p])
+            if any(len(samples[p]) != 3 or any(not math.isfinite(t["median_ms"]) or t["median_ms"] <= 0 for t in samples[p])
                    for p in ("infer", "fwd", "bwd")):
                 raise RuntimeError("Flash calibration returned invalid timing samples")
             if len(_ATTENTION_CACHE) >= 16:
                 _ATTENTION_CACHE.pop(next(iter(_ATTENTION_CACHE)))
             _ATTENTION_CACHE[key] = samples
-        result["samples"] = {p: list(values) for p, values in samples.items()}
+        result["measurements"] = samples
+        result["samples"] = {p: [v["median_ms"] for v in values] for p, values in samples.items()}
         # Recompute owns a fresh forward plus backward, each using the existing
-        # minimum-of-three round-median convention.
-        dense_ms = (min(samples["fwd"]) + min(samples["bwd"]) if phase == "bwd_recompute"
-                    else min(samples[phase]))
+        # median of all round medians; the sum is a throughput proxy, not elapsed attribution.
+        medians = {p: statistics.median(values) for p, values in result["samples"].items()}
+        dense_ms = medians["fwd"] + medians["bwd"] if phase == "bwd_recompute" else medians[phase]
         result.update(available=True, dense_ms=dense_ms, roof_ms=density * dense_ms)
     except Exception as exc:
         result["reason"] = f"{type(exc).__name__}: {exc}"

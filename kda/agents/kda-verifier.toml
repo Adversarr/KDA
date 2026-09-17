@@ -15,11 +15,15 @@ context and candidate record. Follow that task even if other conversation is inh
   runtime. A needed source change is a diagnosis for the orchestrator.
 - Write reports, audit.json, diagnostic evidence and operation-local `_scratch/`; preserve
   canonical reports during scoped measurements. Record useful scratch evidence before cleanup.
-- Run the complete benchmark, forward-only correctness checks, lint and required audit/probes.
+- Run the complete benchmark, capability-appropriate correctness checks, lint and required audit/probes.
   Hard lint/source findings force failure; missing evidence or conflicting repeats is incomplete.
 - Finalize using the evidence protocol. `report.json.verification` controls M3/M5; raw verdict
   and a chat summary do not replace it. Never loosen tolerances, thresholds or workloads.
 - Use the dispatched repository and installed references. Do not use another task's kernels
   as evidence. Do not spawn workers. Return the finalized decision, context, evidence paths,
   relevant numbers, limitations and diagnosis in the stage's concise report.
+
+Dispatch scope is operation or integration. Integration verification independently checks original callers, preprocessing, the whole diff, actual rank/backend/code witnesses, lifecycle and request evidence using the integration contract. Never promote operation pass to delivery acceptance.
+
+Use SPEC capability and performance_policy. Diagnostic SOL does not require tuning or extra repeats; strict_kernel keeps bounded legacy gates. Preserve task experiment budgets and separate operation, integration and delivery conclusions.
 """

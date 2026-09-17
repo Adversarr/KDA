@@ -47,19 +47,19 @@ Mechanics that matter:
 
 * **Plan once, execute many.** The function form `nvmath.linalg.advanced.matmul()` plans on
   every call (1.6 ms wall here). Keep a `Matmul` object per (shape, strides, dtype, epilogue)
-  in a dict, `plan()` once (`autotune()` is optional: 0.2 s, same winner as the heuristic on
+  in the bounded thread-local PlanCache, `plan()` once (`autotune()` is optional: 0.2 s, same winner as the heuristic on
   this shape), then `reset_operands(...)` + `execute()` per call. `execute()` costs **~130 us
   of host time** (Python-level validation), against 14 us for `torch.matmul`: below ~200 us of
   device time per GEMM the CPU cannot keep the GPU fed, and the Triton twin's
   ``mainloop="cublas"`` path (`torch.matmul` + one pointwise pass) is the better choice there.
-  `select_backend` below encodes that boundary; a training step with CUDA graphs or a
-  `torch.compile`d wrapper hides it.
+  `select_backend` below encodes that measured historical boundary. Current capture support
+  is unverified; generated auto adapters choose eager before graph capture.
 * **Operands must match the plan's layout**: a row-strided ``x`` (``x.stride(0) > K``) is a
   different plan (the stride is part of the cache key; nvmath accepts the strided ``x.t()``).
   `reset_operands` re-checks shapes and strides; `reset_operands_unchecked` skips it.
-* The `Matmul` object keeps references to its operands until the next `reset_operands`; the
-  cache therefore pins one activation per plan. Acceptable for a training loop; call
-  `release_operands()` if not.
+* Plans are keyed by operand layout/alignment, stream, epilogue and compute options.
+  The thread-owned cache holds at most eight plans; every execution releases operands.
+  Call `clear_plan_cache()` at the owning lifecycle boundary, including exceptional exit.
 * nvmath runs on the operands' current torch stream; `torch.compile` sees the launcher as an
   opaque custom op like any other package (`_common.compat.register_kernel`).
 """
@@ -91,27 +91,18 @@ _FUSED_ACT_AUX: Dict[str, Tuple[MatmulEpilog, MatmulEpilog]] = {  # same, also s
     "gelu_tanh": (MatmulEpilog.GELU_AUX, MatmulEpilog.GELU_AUX_BIAS),
 }
 
-_PLANS: Dict[tuple, Matmul] = {}
-
-
-def _plan(w: torch.Tensor, xt: torch.Tensor, epilog: MatmulEpilog, bias: Optional[torch.Tensor]) -> Matmul:
-    """One planned `Matmul` per (shapes, strides, dtype, epilogue); operands are reset on every call."""
-    key = (tuple(w.shape), tuple(xt.shape), xt.stride(), w.dtype, epilog, bias is not None, w.device.index)
-    mm = _PLANS.get(key)
-    inputs = {"bias": bias} if bias is not None else None
-    if mm is None:
-        mm = Matmul(w, xt)
-        # `plan(epilog=MatmulEpilog.DEFAULT)` is rejected ("Not supported."): no epilogue is `None`.
-        mm.plan(epilog=None if epilog is MatmulEpilog.DEFAULT else epilog, epilog_inputs=inputs)
-        _PLANS[key] = mm
-    else:
-        mm.reset_operands(a=w, b=xt, epilog_inputs=inputs)
-    return mm
+# Reference execution shares the same lifecycle primitive vendored into generated packages.
+_PLAN_PATH = Path(__file__).resolve().parents[5] / "kda-kernel-scaffold/template/_common/plan_cache.py"
+_plan_spec = importlib.util.spec_from_file_location("kda_ref_plan_cache", _PLAN_PATH)
+_plan_module = importlib.util.module_from_spec(_plan_spec)
+_plan_spec.loader.exec_module(_plan_module)
+_PLANS = _plan_module.PlanCache(capacity=8)
+clear_plan_cache = _PLANS.clear
 
 
 def _product(w: torch.Tensor, xt: torch.Tensor, epilog: MatmulEpilog, bias: Optional[torch.Tensor]):
     """``(W X^T)^T`` (+ epilogue) as a contiguous row-major ``(M, N)`` tensor, plus nvmath's aux dict."""
-    out = _plan(w, xt, epilog, bias).execute()
+    out = _PLANS.execute(w, xt, bias=bias, epilog=None if epilog is MatmulEpilog.DEFAULT else epilog)
     yT, aux = out if isinstance(out, tuple) else (out, None)
     y = yT.t()
     if not y.is_contiguous():
@@ -225,4 +216,4 @@ def gemm_epilogue(
     return _GemmEpilogue.apply(x, w, bias, act, save_aux)
 
 
-__all__ = ["ACTS", "gemm_epilogue", "gemm_epilogue_fwd", "gemm_epilogue_bwd", "select_backend"]
+__all__ = ["ACTS", "gemm_epilogue", "gemm_epilogue_fwd", "gemm_epilogue_bwd", "select_backend", "clear_plan_cache"]

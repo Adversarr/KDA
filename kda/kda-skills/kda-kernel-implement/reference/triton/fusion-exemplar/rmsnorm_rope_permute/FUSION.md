@@ -96,8 +96,9 @@ purpose would only make the kernel worse.
 | fused backward (incl. `dw` reduce) | 0.34 ms | 68% |
 | eager chain backward | 6.87 ms | 3% |
 
-Device time from `torch.profiler` (what `_run_dev.py` reports); CUDA-event wall time would add
-the CPU launch overhead of the eager chain and of `autograd.Function`.
+The recorded measurements use device activity durations from `torch.profiler`. CUDA events
+measure a stream interval; the difference cannot be attributed to host overhead. These
+historical numbers are unchanged.
 
 The forward is at the memory roof. The backward reads `x` and `dy` and writes `dx` (three
 passes) plus the partial reduce; ~2/3 of copy speed is typical for norm backwards whose

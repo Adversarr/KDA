@@ -101,6 +101,11 @@ class WorkloadResult:
     # None when not probed on this workload.
     contract: Optional[Dict[str, dict]] = None
 
+    measurements: Dict[str, dict] = field(default_factory=dict)
+    """Raw samples with actual timing method and cache policy."""
+    execution: Dict[str, Any] = field(default_factory=dict)
+    """Actual verification entry and input geometry."""
+
     def numerics_passed(self, phase: str) -> Optional[bool]:
         results = getattr(self, phase)
         if results is None:
@@ -150,7 +155,9 @@ class WorkloadResult:
     def as_dict(self) -> dict:
         d = asdict(self)
         d["derived"] = {
-            phase: {"sol_eff": self.sol_eff(phase), "speedup": self.speedup(phase)}
+            phase: {"sol_eff": self.sol_eff(phase), "speedup": self.speedup(phase),
+                    "best_available_ratio": self.speedup(phase),
+                    "eager_ratio": (self.time_ms.get(f"eager_{_BASELINE_PHASE.get(phase, phase)}", 0) / self.time_ms[f"kernel_{phase}"]) if self.time_ms.get(f"kernel_{phase}") and self.time_ms.get(f"eager_{_BASELINE_PHASE.get(phase, phase)}") else None}
             for phase in ALL_PHASES
             if f"kernel_{phase}" in self.time_ms
         }
@@ -170,17 +177,15 @@ def verdict(
     ``gate_recompute``: SPEC ``recompute.default``; when true the ``bwd_recompute`` phase gates
     performance like the others (its numerics always do).
 
-    ``gate_perf``: false for a report timed with CUDA events (``env.bench_method == "events"``),
-    which includes host launch overhead that no kernel edit can change; the SOL and baseline
-    rules are then skipped and only numerics, compile and contract decide, so a diagnostic side
-    report cannot say ``tune`` against a profiler-timed report of record that says ``pass``.
+    ``gate_perf`` preserves legacy gates; new reports select them only for
+    explicit ``strict_kernel`` policy with compatible cold profiler measurements.
     """
     reasons: List[str] = []
     missing = coverage_errors([r.as_dict() for r in results], coverage)
     reasons.extend(missing)
     level = 2 if missing else 0  # pass < tune < incomplete < fail
     if not gate_perf:
-        reasons.append("performance not gated: timed with CUDA events (host launch overhead included); the profiler-timed report.json is the record")
+        reasons.append("performance thresholds are diagnostic; inspect each measurement metric and cache policy")
     for r in results:
         if r.skipped:
             reasons.append(f"{r.name}: skipped: {r.skipped}")
@@ -267,10 +272,10 @@ def render_markdown(report: Dict[str, Any]) -> str:
     short = {"fwd": "fwd", "bwd": "bwd", "infer": "infer", RECOMPUTE_PHASE: "bwd_rc"}
     head = ["workload", "req", "dtype"] + [f"{short[p]} ok" for p in phases] + ["compile", "contract"]
     for p in phases:
-        head += [f"kernel {short[p]} ms", f"base {short[p]} ms", f"roof {short[p]} ms", f"SOL eff {short[p]}"]
-    diagnostic = report.get("gate_perf") is False  # explicit --method events side report
+        head += [f"kernel {short[p]} ms", f"base {short[p]} ms", f"roof {short[p]} ms", f"SOL eff {short[p]}", f"eager {short[p]} ratio", f"best {short[p]} ratio"]
+    diagnostic = report.get("gate_perf") is False
     lines = [
-        f"# Report: `{report['op']}` ({report['backend']})" + (" - events-timed diagnostic, not the record" if diagnostic else ""),
+        f"# Report: `{report['op']}` ({report['backend']})" + (" - diagnostic performance policy" if diagnostic else ""),
         "",
         f"- Verdict: **{decision}**"
         + (f" (raw harness: {report['verdict']})" if verification else " (raw harness; verification unfinished)")
@@ -279,10 +284,12 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"- GPU: {env.get('gpu')} (cc {env.get('cc')}) | torch {env.get('torch')} | {report.get('kernel_backend') or 'kernel'} {env.get('kernel_backend_version') or env.get('triton')}",
         f"- Generated: {report['timestamp']}" + (f" | timing: {env['bench_method']}" if env.get("bench_method") else ""),
     ]
+    if report.get("outcomes"):
+        lines += [f"- {key.title()}: {value['status']}" for key, value in report["outcomes"].items()]
     if diagnostic:
         lines.append(
-            "- Times below are CUDA-event wall time per call: device kernels plus host launch overhead (Python, dispatch, autograd). "
-            "Subtract the profiler-timed `report.json` per phase to get the host overhead; SOL eff here is not comparable with the roofs."
+            "- Measurement methods, raw samples and cache policies are recorded per phase. "
+            "CUDA stream elapsed and summed device activity are different measurements; their difference is not CPU overhead."
         )
     lines += [
         "- SOL eff = achievable roof (same-size copy, or cuBLAS on the same GEMMs for tensor-core ops) / kernel time; base = fastest of eager and torch.compile"
@@ -316,7 +323,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         for p in phases:
             base_phase = _BASELINE_PHASE.get(p, p)
             base = min([v for k, v in t.items() if k in (f"compiled_{base_phase}", f"eager_{base_phase}")], default=None)
-            cells += [_fmt(t.get(f"kernel_{p}")), _fmt(base), _fmt(roof.get(p)), _fmt(d.get(p, {}).get("sol_eff"), ".2f")]
+            cells += [_fmt(t.get(f"kernel_{p}")), _fmt(base), _fmt(roof.get(p)), _fmt(d.get(p, {}).get("sol_eff"), ".2f"), _fmt(d.get(p, {}).get("eager_ratio"), ".2f"), _fmt(d.get(p, {}).get("best_available_ratio", d.get(p, {}).get("speedup")), ".2f")]
         lines.append("| " + " | ".join(cells) + " |")
         if r.get("skipped"):
             lines.append(note(f"skipped: {r['skipped']}"))
@@ -369,14 +376,19 @@ def write_report(
     gate_perf: bool = True,
     coverage: Optional[dict] = None,
     source_hashes: Optional[Dict[str, str]] = None,
+    performance_policy: Optional[str] = None,
+    dependencies: Optional[dict] = None,
+    capability: str = "training",
+    invocation: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Write ``report.json`` and ``REPORT.md``; return the report dict.
 
-    ``gate_perf=False`` marks a diagnostic report (``_run_dev.py --method events``, asked for
-    explicitly): performance is not gated (see ``verdict``) and the Markdown says so in its
-    title. A machine without CUPTI, where ``auto`` resolves to events, still gates: that is the
-    only timing it has.
+    Legacy callers retain their existing gate behavior. New runners pass an explicit policy.
     """
+    if performance_policy is not None:
+        if performance_policy not in ("diagnostic", "strict_kernel"):
+            raise ValueError("unknown performance policy")
+        gate_perf = performance_policy == "strict_kernel"
     v, reasons = verdict(results, sol_threshold=sol_threshold, gate_recompute=gate_recompute, gate_perf=gate_perf, coverage=coverage)
     report = {
         "op": op,
@@ -393,6 +405,21 @@ def write_report(
         "coverage": coverage,
         "source_hashes": source_hashes,
     }
+    if performance_policy is not None:
+        from .acceptance import operation_outcomes
+        from .dependencies import GROUPS
+        report.update(schema_version=2, scope="operation", performance_policy=performance_policy,
+                      dependencies=dependencies, capability=capability, invocation=invocation)
+        report["outcomes"] = operation_outcomes(report)
+        report["evidence_items"] = [{"workload": row["name"], "depends_on": list(GROUPS),
+                                    "environment": env, "invocation": invocation,
+                                    "measurements": list(row.get("measurements", {}))} for row in report["workloads"]]
+        errors = report["outcomes"]["performance"]["findings"]
+        if report["outcomes"]["correctness"]["status"] == "fail":
+            report["verdict"] = "fail"
+        if errors and report["verdict"] != "fail":
+            report["verdict"] = "incomplete"
+            report["reasons"].extend(errors)
     Path(json_path).parent.mkdir(parents=True, exist_ok=True)
     Path(md_path).parent.mkdir(parents=True, exist_ok=True)
     Path(json_path).write_text(json.dumps(report, indent=2))

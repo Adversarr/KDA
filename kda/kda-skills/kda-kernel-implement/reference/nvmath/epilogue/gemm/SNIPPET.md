@@ -35,21 +35,20 @@ Backward: the Triton twin's adjoint kernel (`dZ = dY * act'(Z)`, `db` from fp32 
   one streaming ReLU. `MatmulEpilog.DEFAULT` is not accepted by `plan()`: pass `epilog=None`.
   cuBLASLt's GELU is the **tanh approximation**, which is what models call GELU today; the erf
   form differs by up to 2e-3 and is not fusable here.
-- **Plan once.** A `Matmul` object per `(shapes, strides, dtype, epilog, has_bias, device)` in a
-  dict; `plan()` once (~1.6 ms wall), `reset_operands()` + `execute()` per call. The function
-  form `nvmath.linalg.advanced.matmul()` replans every call. A row-strided `x` is its own plan.
-- **Host cost.** `execute()` plus the transposes cost ~175 us of Python per call against 18 us
-  for `torch.matmul` and 75 us for `torch.matmul` + the Triton pointwise pass. A GEMM shorter
-  than that on the device is CPU-bound through nvmath: `select_backend(M, N, K)` returns
-  `"triton"` below `2MNK = 6e10` FLOP (~200 us on A800). CUDA graphs or a `torch.compile`d
-  training step hide the overhead entirely, so a package used under `torch.compile` can ignore
-  the boundary.
-- The `Matmul` object holds its operands until the next `reset_operands` (one pinned activation
-  per plan); `release_operands()` if that matters. It runs on the current torch stream.
+- **Plan reuse.** Use the bounded thread-local cache described below. Historical planning
+  time was ~1.6 ms wall; reuse resets operands and executes on the keyed current stream.
+  The function form `nvmath.linalg.advanced.matmul()` replans every call.
+- **Request cost.** The historical reference selected Triton below `2MNK = 6e10` FLOP
+  (~200 us on A800). Treat that boundary as a hypothesis for a new task; determine request
+  benefit with unprofiled A/B. Compilation does not establish safe capture or erase host cost.
+- Call `release_operands()` after every execution, including failure. Do not retain an
+  activation per cached plan; clear plans at the declared lifecycle boundary.
 
 ## Measured (A800, bf16, `torch.profiler` device time, 2026-09-04)
 
-Min of three interleaved rounds; the GPU is unlocked, compare within a table. `eager` is
+Historical min of three interleaved rounds, retained without remeasurement; this selection
+does not meet the new median-and-raw-sample acceptance protocol. The GPU was unlocked.
+`eager` is
 `F.linear` + `F.gelu(approximate="tanh")`; `compile` is `torch.compile` of it.
 
 | shape (M x N x K) | phase | cuBLAS alone | eager | compile | nvmath (Z saved) | nvmath infer | triton fused | triton cuBLAS + epi |
@@ -63,8 +62,9 @@ Min of three interleaved rounds; the GPU is unlocked, compare within a table. `e
 | 8192 x 8192 x 2048 (`examples/fused_gemm_epilogue`) | fwd | 1029 | 1213 | 1198 | **1045** | 1018 | 1274 | 1171 |
 | | bwd | | 2300 | 2347 | 2285 | | 2318 | |
 
-Host time per call (4096 x 1024 x 1024, us): `torch.matmul` 18, Triton cuBLAS + epilogue 75,
-nvmath 176.
+Historical values labelled "host time per call" (4096 x 1024 x 1024, us): `torch.matmul` 18,
+Triton cuBLAS + epilogue 75, nvmath 176. Their collection boundary is not established here;
+these values cannot support a current host-overhead attribution or elapsed-time subtraction.
 
 What the table says:
 
@@ -74,9 +74,8 @@ What the table says:
   kernel for that shape than torch's cuBLAS call does.
 - The aux store (`GELU_AUX_BIAS` vs `GELU_BIAS`) costs 1-7% of the forward, the price of a
   backward-ready `Z`; infer mode (`save_aux=False`) skips it.
-- On the small `D x D` shape the fused Triton kernel wins by 8% on device time, and nvmath's
-  host cost (176 us against a 74 us kernel) makes it CPU-bound in eager mode: this is the case
-  `select_backend` sends to Triton.
+- On the small `D x D` shape the historical fused Triton kernel wins by 8% on device activity
+  time. Request measurements are needed to establish the deployment bottleneck.
 - The backward is a wash everywhere (two cuBLAS GEMMs dominate; the adjoint is bandwidth-bound).
 
 ## In a kernel package
@@ -85,4 +84,13 @@ SPEC `kernel_backend: nvmath`; `_nvmath/_impl_fwd.py` holds the plan cache and t
 `_impl_bwd.py` imports the adjoint from the package's Triton file or reimplements the 40-line
 streaming kernel. The lint rules about `tl.dot` operands do not apply (there is no DSL kernel);
 the roofline's `gemm_shapes` still lists the GEMM so the harness times cuBLAS on it, and the
-verdict compares against `torch.compile` as for every other backend.
+report compares against `torch.compile`; only explicit strict_kernel policy gates on it.
+
+## Stateful execution contract
+
+Use the vendored `_common.plan_cache.PlanCache`: thread-owned, bounded (default eight),
+keyed by all operand shapes/strides/dtypes/devices/alignment, stream, epilogue and options.
+Operands are released after execution; clear the owning thread's plans at request teardown
+on success and failure. Capture is unsupported unless independently validated: `auto` selects
+eager before calling the backend. Validate the installed nvmath API, and test offset sequences,
+stream changes, eviction, operand weak references and exception cleanup before integration.

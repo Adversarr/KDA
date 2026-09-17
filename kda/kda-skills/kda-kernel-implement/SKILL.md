@@ -13,12 +13,14 @@ Three modes, chosen by the dispatch prompt:
 
 | mode | when | you produce |
 |---|---|---|
-| `implement` | M2, first iteration | `_<kb>/*` passing `_run_dev.py --verify` for both backends and the lint |
+| `implement` | M2, first iteration | `_<kb>/*` passing capability-required verification and lint |
 | `tune` | M4, remaining STATUS tune budget, finalized verdict was `tune` | one hypothesis applied and measured, logged |
 | `freeze` | M5, passed or correct best-so-far candidate (also frozen repair) | `_configs.py` branches, `TUNED.json`, autotune removed, re-verified |
 
 `<kb>` is SPEC `kernel_backend` (`triton`, `nvmath` or `tilelang`): the kernel directory is `_<kb>/`, the
-backends are `<kb>` and `<kb>_fwd_only`. Kernel work happens in `python` of the user's
+backend is `<kb>`; training also verifies `<kb>_fwd_only` as an eager-adjoint control.
+For eager_grad that alias uses the same callable and is not independent coverage.
+Kernel work happens in `python` of the user's
 environment (GPU visible): every `python` in this file means the `python:` line of your
 dispatch, verbatim (a repo-specific wrapper or an absolute path), never the bare word.
 `_run_dev.py` writes `report.json` and `REPORT.md` into `<op_dir>`.
@@ -76,7 +78,11 @@ Completion: no `TODO` remains in the Fusion plan.
 
 ## 2. Implement `_<kb>/` (`implement` mode)
 
-Files and what each must satisfy (the template's `TODO(implementer)` comments mark the spots):
+Follow SPEC capability. For inference and eager_grad, implement only the generated forward,
+fake and registration: no dummy backward, saved aux or recompute. Inference rejects calls
+requiring gradients; eager_grad uses the shared eager adjoint. The backward, aux and recompute
+instructions below apply only to training. The template's `TODO(implementer)` comments mark
+the implementation points:
 
 - `_impl_fwd.py`: the kernel(s) and a **fully type-annotated** launcher
   `<op>_fwd(..., save_aux: bool) -> Tuple[...]` returning the user-visible outputs followed by
@@ -152,11 +158,11 @@ Kernel conventions, all of them checked by the verifier and by `lint_kernel.py`:
   intermediates. Saved tensors that are not user-visible outputs are written only under
   `SAVE_AUX`; with `RECOMPUTE` they are rebuilt in the backward.
 
-Then run, in this order, and fix until all pass:
+Then run the applicable checks, in this order, and fix until all pass:
 
 ```bash
-python -m kda_kernels.<op>._run_dev --verify --backend <kb>_fwd_only --json <op_dir>/report.fwd_only.json --md <op_dir>/report.fwd_only.md   # forward kernel alone
-python -m kda_kernels.<op>._run_dev --verify --backend <kb> --json <op_dir>/report.verify.json --md <op_dir>/report.verify.md   # fused backward too
+python -m kda_kernels.<op>._run_dev --verify --backend <kb>_fwd_only --json <op_dir>/report.fwd_only.json --md <op_dir>/report.fwd_only.md   # training only: eager-adjoint control
+python -m kda_kernels.<op>._run_dev --verify --backend <kb> --json <op_dir>/report.verify.json --md <op_dir>/report.verify.md   # all capabilities
 python .agents/skills/kda-kernel-verify-and-bench/scripts/lint_kernel.py <op_dir>   # exit 0 = no hard finding
 ```
 
@@ -181,7 +187,7 @@ compiler/harness failure and ownership evidence instead of assuming a fake bug. 
 the fake's outputs, so a probe without it reuses the artefact built against your *previous*
 fake and reports shapes your code no longer produces (`_run_dev.py` does this for you).
 
-Completion: both correctness reports have verdict `pass` on all required coverage and lint
+Completion: capability-required correctness reports have verdict `pass` on all required coverage and lint
 has no hard finding. Exit 0 alone is insufficient: an incomplete result is not a pass.
 Return `performance: pending M3`; no closing benchmark is required in implement mode.
 Optional skipped rows remain notes. Required missing GPU/memory evidence is incomplete and
@@ -230,14 +236,14 @@ is `torch.matmul` plus one epilogue kernel over the product (the reference's
 `mainloop="cublas"` path; on A800 that is every wide-output shape, `compute-patterns.md`
 mainloop note). Record which shapes went which way in `IMPL_NOTES.md`.
 
-All performance comparisons use device time: `--method profiler` is the measurement method, and the
-roofs are only comparable with it. `--method events` adds host launch overhead that no kernel
-edit can change; use it at most as a side measurement into `report.events.json`. `auto` can
-fall back to `events` on a CUPTI hiccup: if `env.bench_method` in the record you just wrote says `events`, re-run
-with `--method profiler`; an events record is not a performance hint, its `sol_eff` can read
-0.00 or above 1 on rows whose kernels it missed.
+Use [structured measurements](../kda-kernel-scaffold/reference/measurement.md). Cold profiler
+activity sums support the existing roof diagnostics. Events measure stream elapsed; request
+wall time evaluates the task target. Preserve actual method, cache policy, raw samples and
+execution order; mismatched methods cannot support a ratio or roof claim. The default
+performance_policy is diagnostic; only strict_kernel activates legacy gates/repeats. A tune
+experiment must answer a named decision within the existing budget.
 
-Re-run `--verify` for both backends and lint, then measure the hypothesis in side files:
+Re-run capability-required verification and lint, then measure the hypothesis in side files:
 
 ```bash
 python -m kda_kernels.<op>._run_dev --bench --backend <kb> --method profiler --iteration <n> --json <op_dir>/report.tune.<n>.json --md <op_dir>/report.tune.<n>.md
@@ -270,13 +276,14 @@ change, the before/after `sol_eff` of the targeted phase, and the next hypothesi
    It is the measurement record: one entry per branch of `select_config` naming the workload
    that chose it and its `sol_eff`. The 4-branch cap is on `select_config`, not on this file,
    but do not list nine workloads for one branch either; one entry per branch is the shape.
-4. Run both backend verifies and lint. Populate TUNED from the candidate's measured
+4. Run capability-required verification and lint. Populate TUNED from the candidate's measured
    configurations and evidence paths; a new configuration needs targeted diagnostic measurement.
    Frozen performance remains pending the subsequent M3 on the same run number.
 
 Completion: no autotune decorators or dev sweeps remain, TUNED identifies the measured
-candidate configurations, and both numerical verifies plus lint pass. Report `frozen performance:
-pending M3`. A best-so-far candidate remains `tune`; freezing does not waive a performance gate.
+candidate configurations, and required numerical verification plus lint pass. Report `frozen performance:
+pending M3`. Under strict_kernel, a best-so-far candidate remains `tune` until its gates pass.
+Under diagnostic, SOL alone does not block freezing; request targets and uncertainty remain in acceptance.
 
 ## 5. Report back
 

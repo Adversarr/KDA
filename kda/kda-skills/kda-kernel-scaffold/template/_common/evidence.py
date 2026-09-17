@@ -14,13 +14,17 @@ from typing import Any, Dict, List, Optional
 def source_hashes(op_dir: Path) -> Dict[str, str]:
     """Hash the contract and executable package, excluding scratch and checkpoints."""
     op_dir = Path(op_dir)
-    files = [op_dir / "SPEC.md"]
+    files = [op_dir / "SPEC.md", op_dir / "TUNED.json"]
     files += [p for p in op_dir.rglob("*.py")
               if not {"_scratch", "_checkpoints", "__pycache__"} & set(p.relative_to(op_dir).parts)]
     common = op_dir.parent / "_common"
     files += list(common.glob("*.py")) + [common / "VERSION"]
-    return {str(p.relative_to(op_dir.parent)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(files) if p.is_file()}
+    from .dependencies import contract_digest
+    def digest(path):
+        if path.name == "SPEC.md" and "kda_spec: 3" in path.read_text():
+            return contract_digest(path.read_text())
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    return {str(p.relative_to(op_dir.parent)): digest(p) for p in sorted(files) if p.is_file()}
 
 
 def coverage_errors(rows: List[dict], coverage: Optional[dict]) -> List[str]:
@@ -91,7 +95,7 @@ def _phase_gates(row: dict, phase: str) -> tuple:
 
 def report_digest(report: dict) -> str:
     """Bind an audit to raw measurement content; finalizing again does not change this digest."""
-    raw = {k: v for k, v in report.items() if k != "verification"}
+    raw = {k: v for k, v in report.items() if k not in ("verification", "evidence_current")}
     return hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest()
 
 
@@ -126,35 +130,51 @@ def finalize(op_dir: Path, audit_path: Path) -> dict:
     if audit.get("report_digest") != report_digest(report):
         finding("audit is not bound to the current raw report", audit_relative)
     current = source_hashes(op_dir)
+    modern = report.get("schema_version") == 2
+    strict = report.get("performance_policy", "strict_kernel") == "strict_kernel"
+    if modern:
+        from .dependencies import operation_dependencies, invalidation, GROUPS
+        freshness = invalidation(report.get("dependencies"), operation_dependencies(op_dir), GROUPS)
+        if not freshness["valid"]:
+            finding(f"evidence dependencies changed: {freshness['changed']}; {freshness['action']}", "report.json/dependencies")
     coverage = report.get("coverage")
     if not coverage or not coverage.get("required"):
         finding("legacy or missing expected coverage; update runner and rerun", "report.json")
-    if report.get("source_hashes") != current:
+    if not modern and report.get("source_hashes") != current:
         finding("contract, operation source or shared runtime changed since measurement", "report.json/source_hashes")
     if not coverage or not coverage.get("benchmark") or set(coverage.get("all_workloads", [])) != {r["name"] for r in report["workloads"]}:
         finding("M3 requires a complete benchmark record", "report.json/coverage")
     if report.get("backend") != report.get("kernel_backend"):
         finding("primary record must use the full kernel backend", "report.json/backend")
-    if report.get("env", {}).get("bench_method") != "profiler" or report.get("gate_perf") is False:
+    if not modern and strict and (report.get("env", {}).get("bench_method") != "profiler" or report.get("gate_perf") is False):
         finding("performance evidence requires profiler timing", "report.json/env")
     raw_verdict, raw_reasons = verdict([_result(r) for r in report["workloads"]],
                                       gate_recompute=report.get("gate_recompute", False),
                                       gate_perf=report.get("gate_perf", True), coverage=coverage)
+    if modern:
+        from .acceptance import operation_outcomes
+        outcomes = operation_outcomes(report)
+        if outcomes["correctness"]["status"] == "fail":
+            raw_verdict = "fail"
+        elif outcomes["performance"]["findings"] and raw_verdict != "fail":
+            raw_verdict = "incomplete"
+        raw_reasons += outcomes["performance"]["findings"]
     if raw_verdict != report.get("verdict"):
         finding("stored verdict disagrees with measured evidence", "report.json/verdict")
-    try:
-        forward = json.loads((op_dir / "report.fwd_only.json").read_text())
-    except (OSError, ValueError):
-        forward = {}
-    if (forward.get("source_hashes") != current or not forward.get("coverage")
-            or forward.get("backend") != str(report.get("kernel_backend")) + "_fwd_only"
-            or set(forward.get("coverage", {}).get("required", {})) != set((coverage or {}).get("required", {}))):
-        finding("matching forward-only verification missing", "report.fwd_only.json")
-    else:
-        fv, _ = verdict([_result(r) for r in forward["workloads"]], gate_perf=False,
-                        coverage=forward["coverage"])
-        if fv != "pass":
-            finding("forward-only verification did not pass", "report.fwd_only.json", "hard" if fv == "fail" else "unresolved")
+    if report.get("capability", "training") == "training":
+        try:
+            forward = json.loads((op_dir / "report.fwd_only.json").read_text())
+        except (OSError, ValueError):
+            forward = {}
+        if (forward.get("source_hashes") != current or not forward.get("coverage")
+                or forward.get("backend") != str(report.get("kernel_backend")) + "_fwd_only"
+                or set(forward.get("coverage", {}).get("required", {})) != set((coverage or {}).get("required", {}))):
+            finding("matching forward-only verification missing", "report.fwd_only.json")
+        else:
+            fv, _ = verdict([_result(r) for r in forward["workloads"]], gate_perf=False,
+                            coverage=forward["coverage"])
+            if fv != "pass":
+                finding("forward-only verification did not pass", "report.fwd_only.json", "hard" if fv == "fail" else "unresolved")
     if audit.get("audit_complete") is not True:
         finding("verifier audit is unfinished", str(audit_path.name))
     independence = audit.get("independence")
@@ -168,7 +188,7 @@ def finalize(op_dir: Path, audit_path: Path) -> dict:
         raise ValueError("audit.reruns must map workload names to lists of diagnostic JSON paths")
     for row in report["workloads"]:
         name = row["name"]
-        tagged = any(reason.startswith(name + "/") and "near gate:" in reason and "(not gated)" not in reason for reason in raw_reasons)
+        tagged = strict and any(reason.startswith(name + "/") and "near gate:" in reason and "(not gated)" not in reason for reason in raw_reasons)
         paths = reruns.get(name, [])
         if not isinstance(paths, list) or any(not isinstance(p, str) for p in paths):
             raise ValueError("each reruns entry must be a list of paths")
@@ -210,6 +230,16 @@ def finalize(op_dir: Path, audit_path: Path) -> dict:
                               "independence": independence, "findings": findings,
                               "evidence": {"audit": audit_relative, "forward_only": "report.fwd_only.json", "reruns": reruns},
                               "notes": audit.get("notes", ""), "diagnosis": audit.get("diagnosis", "")}
+    if modern:
+        from .acceptance import operation_outcomes
+        outcomes = operation_outcomes(report)
+        if report.get("outcomes") != outcomes:
+            report["verification"]["verdict"] = "incomplete"
+            findings.append({"severity": "unresolved", "reason": "outcomes disagree with raw evidence", "evidence": "report.json/outcomes"})
+        report["evidence_current"] = freshness["valid"]
+        report["verification"]["scope"] = "operation"
+    report["verification"]["report_digest"] = report_digest(report)
+    report["verification"]["audit_digest"] = hashlib.sha256(Path(audit_path).read_bytes()).hexdigest()
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     (op_dir / "REPORT.md").write_text(render_markdown(report))
     return report
@@ -275,14 +305,59 @@ def checkpoint(op_dir: Path, name: str, restore: bool = False) -> Path:
     return dest
 
 
+def reanalyze(op_dir: Path, report_path: Path) -> dict:
+    """Recompute derived conclusions after analysis-only edits without changing raw samples."""
+    from .dependencies import GROUPS, operation_dependencies, invalidation
+    from .acceptance import operation_outcomes
+    from .report import verdict, render_markdown
+    import statistics
+    report = json.loads(Path(report_path).read_text())
+    if report.get("schema_version") != 2:
+        raise ValueError("legacy evidence requires explicit upgrade and new measurements")
+    current = operation_dependencies(op_dir)
+    action = invalidation(report.get("dependencies"), current, GROUPS)
+    if action["action"] == "rerun":
+        raise ValueError(f"execution dependencies changed; remeasure: {action['changed']}")
+    old_digest = report_digest(report)
+    for row in report["workloads"]:
+        for key, item in row.get("measurements", {}).items():
+            if key in row.get("time_ms", {}) and item.get("samples_ms"):
+                item["median_ms"] = row["time_ms"][key] = statistics.median(item["samples_ms"])
+        row["derived"] = _result(row).as_dict()["derived"]
+    report["verdict"], report["reasons"] = verdict([_result(row) for row in report["workloads"]],
+        gate_perf=report["performance_policy"] == "strict_kernel", gate_recompute=report.get("gate_recompute", False),
+        coverage=report.get("coverage"))
+    report["outcomes"] = operation_outcomes(report)
+    if report["outcomes"]["performance"]["findings"] and report["verdict"] != "fail":
+        report["verdict"] = "incomplete"
+    report.setdefault("analysis_history", []).append({"previous_report_digest": old_digest,
+        "previous_dependencies": report["dependencies"], "action": action})
+    report["dependencies"] = current
+    report["source_hashes"] = source_hashes(op_dir)
+    report.pop("verification", None)
+    report.pop("evidence_current", None)
+    Path(report_path).write_text(json.dumps(report, indent=2) + "\n")
+    md = Path(op_dir) / "REPORT.md" if Path(report_path).name == "report.json" else Path(report_path).with_suffix(".md")
+    md.write_text(render_markdown(report))
+    return report
+
+
 def main() -> None:
     """Small checkpoint CLI for orchestrators, independent of GPU/DSL imports."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("op_dir", type=Path)
-    parser.add_argument("name")
+    parser.add_argument("name", nargs="?")
     parser.add_argument("--restore", action="store_true")
+    parser.add_argument("--reanalyze", type=Path, help="rederive a v2 report after analysis-only edits; audit again")
     args = parser.parse_args()
     try:
+        if args.reanalyze:
+            if args.name or args.restore:
+                parser.error("reanalyze cannot be combined with checkpoint operations")
+            reanalyze(args.op_dir, args.reanalyze)
+            return
+        if not args.name:
+            parser.error("checkpoint name is required")
         print(checkpoint(args.op_dir, args.name, restore=args.restore))
     except (ValueError, OSError) as exc:
         parser.exit(2, f"{exc}\n")

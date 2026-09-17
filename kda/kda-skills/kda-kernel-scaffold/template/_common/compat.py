@@ -227,6 +227,7 @@ def with_eager_backward(
     class _Fn(torch.autograd.Function):
         @staticmethod
         def forward(ctx: Any, *inputs: Any) -> Tuple[torch.Tensor, ...]:
+            ctx.set_materialize_grads(False)
             ctx.is_tensor = [isinstance(a, torch.Tensor) for a in inputs]
             ctx.non_tensors = [None if t else a for a, t in zip(inputs, ctx.is_tensor)]
             ctx.save_for_backward(*[a for a in inputs if isinstance(a, torch.Tensor)])
@@ -244,14 +245,21 @@ def with_eager_backward(
                 ]
                 outputs = tuple(eager(**dict(zip(names, leaves))))[:n_outputs]
                 wrt = [a for a, t, need in zip(leaves, ctx.is_tensor, ctx.needs_input_grad) if t and need]
-                grads = iter(torch.autograd.grad(outputs, wrt, grad_outputs, allow_unused=True)) if wrt else iter(())
+                pairs = [(o, g) for o, g in zip(outputs, grad_outputs) if o.requires_grad and g is not None]
+                values = torch.autograd.grad([o for o, _ in pairs], wrt, [g for _, g in pairs],
+                                             allow_unused=True) if wrt and pairs else [None] * len(wrt)
+                grads = iter(values)
             return tuple(next(grads) if (t and need) else None for t, need in zip(ctx.is_tensor, ctx.needs_input_grad))
+
+    # Let AOTAutograd trace the eager adjoint as tensor operations; Dynamo cannot
+    # bytecode-trace requires_grad_ inside a custom Function's backward.
+    apply = torch.compiler.allow_in_graph(_Fn) if USE_CUSTOM_OP else _Fn
 
     def call(*args: Any, **kwargs: Any) -> Tuple[torch.Tensor, ...]:
         if recompute_arg is not None:
             kwargs = dict(kwargs)
             kwargs.pop(recompute_arg, None)
-        return tuple(_Fn.apply(*flatten(*args, **kwargs)))
+        return tuple(apply.apply(*flatten(*args, **kwargs)))
 
     return call
 
@@ -265,3 +273,14 @@ __all__ = [
     "make_differentiable",
     "with_eager_backward",
 ]
+
+
+def inference_only(fwd, *, n_outputs):
+    """Expose a forward-only callable that rejects differentiable invocations."""
+    def call(*args, **kwargs):
+        if kwargs.pop("recompute", False):
+            raise ValueError("inference capability has no recompute path")
+        if needs_backward(*args, *kwargs.values()):
+            raise ValueError("inference capability does not support gradients")
+        return tuple(fwd(*args, **kwargs, save_aux=False))[:n_outputs]
+    return call
